@@ -70,11 +70,12 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_CODE = 999;
     private static final String CALL_EXPERT = "CALL EXPERT";
     private static final String REPORT = "REPORT";
+    private static final String WCA_PRE_START_STATE = "WCA_PRE_START_STATE";
     private static final String WCA_END_STATE = "WCA_END_STATE";
     private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
 
-    private String step;
+    private String step = WCA_PRE_START_STATE;
 
     private ServerComm serverComm;
     private YuvToJPEGConverter yuvToJPEGConverter;
@@ -128,9 +129,15 @@ public class MainActivity extends AppCompatActivity {
                     alertDialog.show();
                 });
             }
+
+            if (step.equals(WCA_PRE_START_STATE)) {
+                Log.i(TAG, "Assembly started.");
+                // TODO: Begin profiling
+            }
             step = toClientExtras.getStep();
             if (step.equals(WCA_END_STATE)) {
                 Log.i(TAG, "Assembly completed.");
+                // TODO: End profiling
             }
 
             // Display or hide the thumbs-up icon
@@ -286,6 +293,7 @@ public class MainActivity extends AppCompatActivity {
                 image.close();
                 return;
             }
+            // TODO: Count camera input frames
             ToServerExtras.ClientCmd clientCmd = prepCommand;
             prepCommand = ToServerExtras.ClientCmd.NO_CMD;
             serverComm.sendSupplier(() -> {
