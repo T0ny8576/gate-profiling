@@ -36,14 +36,17 @@
 ehthumbs.db
 Thumbs.db
 
-# Media file#
-#############
+# Media files #
+###############
 *.mp4
 *.jpg
 *.jpeg
-# TFRECORD FILE#
-#############
+
+# Other #
+#########
 *.tfrecord
 .idea
 .pbtxt
 .txt
+logs/
+plots/

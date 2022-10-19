@@ -227,6 +227,7 @@ def _thumbs_up_required(processor):
 class InferenceEngine(cognitive_engine.Engine):
 
     def __init__(self, fsm_file_path):
+        self._frame_tx_count = 0
         # ############################################ Temp fix
         # TODO: Add them in the protobuf message to make the server stateless
         self.count_ = 0
@@ -280,7 +281,7 @@ class InferenceEngine(cognitive_engine.Engine):
         status = gabriel_pb2.ResultWrapper.Status.SUCCESS
         result_wrapper = cognitive_engine.create_result_wrapper(status)
 
-        logger.info('sending %s', transition.instruction.audio)
+        # logger.info('sending %s', transition.instruction.audio)
 
         result = gabriel_pb2.ResultWrapper.Result()
         result.payload_type = gabriel_pb2.PayloadType.TEXT
@@ -390,8 +391,9 @@ class InferenceEngine(cognitive_engine.Engine):
             return self._result_wrapper_for_transition(transition)
 
         step = to_server_extras.step
-        if step == '':
+        if step == "WCA_FSM_START" or not step:
             state = self._states_models.get_start_state()
+            self._frame_tx_count = 0
         elif step == "WCA_FSM_END":
             return self._result_wrapper_for(step,
                                             user_ready=owf_pb2.ToClientExtras.UserReady.DISABLE)
@@ -400,6 +402,8 @@ class InferenceEngine(cognitive_engine.Engine):
             return self._try_start_zoom(step)
         else:
             state = self._states_models.get_state(step)
+
+        self._frame_tx_count += 1
 
         # Save current cache folder and create a new cache folder
         if (to_server_extras.client_cmd ==
@@ -417,6 +421,7 @@ class InferenceEngine(cognitive_engine.Engine):
 
         # End state reached
         if len(state.processors) == 0:
+            logger.info("Client done. # Frame transmitted = %s", self._frame_tx_count)
             return self._result_wrapper_for(step="WCA_FSM_END",
                                             user_ready=owf_pb2.ToClientExtras.UserReady.DISABLE)
 
@@ -501,8 +506,8 @@ class InferenceEngine(cognitive_engine.Engine):
         if not good_boxes:
             return self._result_wrapper_for(step)
 
-        print()
-        print('Detector boxes:', box_scores)
+        # print()
+        # print('Detector boxes:', box_scores)
         for best_box in good_boxes:
             ymin, xmin, ymax, xmax = best_box
             (left, right, top, bottom) = (xmin * im_width, xmax * im_width,
@@ -560,7 +565,7 @@ class InferenceEngine(cognitive_engine.Engine):
                 transformed = self._transform(cropped_pil).cuda()
                 output = classifier.model(transformed[None, ...])
                 prob = torch.nn.functional.softmax(output, dim=1)
-                print('Classifier probability:', prob.data.cpu().numpy())
+                # print('Classifier probability:', prob.data.cpu().numpy())
 
                 value, pred = prob.topk(1, 1, True, True)
                 if value.item() < CLASSIFIER_THRESHOLD:

@@ -14,6 +14,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.OWF">
         <activity android:name="edu.cmu.cs.owf.MainActivity"
+            android:exported="true"
             android:screenOrientation="landscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

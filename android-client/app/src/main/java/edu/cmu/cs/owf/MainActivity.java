@@ -13,11 +13,16 @@ import androidx.camera.core.ImageProxy;
 import androidx.camera.view.PreviewView;
 
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.AssetManager;
 import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
+import android.os.BatteryManager;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
@@ -32,10 +37,16 @@ import com.google.protobuf.InvalidProtocolBufferException;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
 
 import edu.cmu.cs.gabriel.camera.CameraCapture;
@@ -70,12 +81,12 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_CODE = 999;
     private static final String CALL_EXPERT = "CALL EXPERT";
     private static final String REPORT = "REPORT";
-    private static final String WCA_PRE_START_STATE = "WCA_PRE_START_STATE";
-    private static final String WCA_END_STATE = "WCA_END_STATE";
+    private static final String WCA_FSM_START = "WCA_FSM_START";
+    private static final String WCA_FSM_END = "WCA_FSM_END";
     private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
 
-    private String step = WCA_PRE_START_STATE;
+    private String step = WCA_FSM_START;
 
     private ServerComm serverComm;
     private YuvToJPEGConverter yuvToJPEGConverter;
@@ -88,6 +99,18 @@ public class MainActivity extends AppCompatActivity {
     private TextView readyTextView;
     private VideoView instructionVideo;
     private File videoFile;
+
+    private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
+    private final String LOGFILE = sdf.format(new Date()) + ".txt";
+
+
+    private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
+    private BatteryManager mBatteryManager;
+    private BroadcastReceiver batteryReceiver;
+    private FileWriter logFileWriter;
+    private Timer timer;
+    private int inputFrameCount = 0;
+    private static final long TIMER_PERIOD = 1000;
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -130,14 +153,17 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
 
-            if (step.equals(WCA_PRE_START_STATE)) {
-                Log.i(TAG, "Assembly started.");
-                // TODO: Begin profiling
+            if (step.equals(WCA_FSM_START)) {
+                logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
+                inputFrameCount = 1;
+                Log.i(TAG, "Profiling started.");
             }
             step = toClientExtras.getStep();
-            if (step.equals(WCA_END_STATE)) {
-                Log.i(TAG, "Assembly completed.");
-                // TODO: End profiling
+            if (step.equals(WCA_FSM_END)) {
+                logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
+                logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
+                writeLog();
+                Log.i(TAG, "Profiling completed.");
             }
 
             // Display or hide the thumbs-up icon
@@ -236,7 +262,9 @@ public class MainActivity extends AppCompatActivity {
             readyView.setImageDrawable(drawable);
             ins.close();
         }
-        catch(IOException ignored) {}
+        catch(IOException e) {
+            e.printStackTrace();
+        }
 
         instructionImage = findViewById(R.id.instructionImage);
         instructionViewUpdater = new ImageViewUpdater(instructionImage);
@@ -251,8 +279,37 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        File logFile = new File(getExternalFilesDir(null), LOGFILE);
+        logFile.delete();
+        logFile = new File(getExternalFilesDir(null), LOGFILE);
+        try {
+            logFileWriter = new FileWriter(logFile, true);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        IntentFilter intentFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+        batteryReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                int voltage = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, Integer.MIN_VALUE);
+                int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, Integer.MIN_VALUE);
+                int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, Integer.MIN_VALUE);
+                String voltageMsg = TAG + ": Time: " + SystemClock.uptimeMillis() +
+                        "\tBattery voltage = " + voltage +
+                        " Level = " + level + "/" + scale + "\n";
+                logList.add(voltageMsg);
+            }
+        };
+        registerReceiver(batteryReceiver, intentFilter);
+
+        mBatteryManager = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
+
+        timer = new Timer();
+        timer.scheduleAtFixedRate(new LogTimerTask(), 0, TIMER_PERIOD);
+
         Consumer<ErrorType> onDisconnect = errorType -> {
-            Log.e("MainActivity", "Disconnect Error: " + errorType.name());
+            Log.e(TAG, "Disconnect Error: " + errorType.name());
             finish();
         };
         serverComm = ServerComm.createServerComm(
@@ -261,7 +318,7 @@ public class MainActivity extends AppCompatActivity {
         TextToSpeech.OnInitListener onInitListener = i -> {
             textToSpeech.setLanguage(Locale.US);
 
-            ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep("").build();
+            ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep(step).build();
             InputFrame inputFrame = InputFrame.newBuilder()
                     .setExtras(pack(toServerExtras))
                     .build();
@@ -274,6 +331,30 @@ public class MainActivity extends AppCompatActivity {
 
         yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
+    }
+
+    class LogTimerTask extends TimerTask {
+        @Override
+        public void run() {
+            int current = mBatteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
+            String testMag = TAG + ": Time: " + SystemClock.uptimeMillis() +
+                    "\tCurrent: " + current + "\n";
+            logList.add(testMag);
+        }
+    }
+
+    private void writeLog() {
+        timer.cancel();
+        timer.purge();
+        unregisterReceiver(batteryReceiver);
+        try {
+            for (String logString: logList) {
+                logFileWriter.write(logString);
+            }
+            logFileWriter.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     // Based on
@@ -289,11 +370,11 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void analyze(@NonNull ImageProxy image) {
             boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
-            if (step.equals(WCA_END_STATE) && !toWait) {
+            if (step.equals(WCA_FSM_END) && !toWait) {
                 image.close();
                 return;
             }
-            // TODO: Count camera input frames
+            inputFrameCount++;
             ToServerExtras.ClientCmd clientCmd = prepCommand;
             prepCommand = ToServerExtras.ClientCmd.NO_CMD;
             serverComm.sendSupplier(() -> {
