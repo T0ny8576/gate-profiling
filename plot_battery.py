@@ -39,21 +39,21 @@ def draw(log_file, output_file, label):
         battery_level = []
         battery_scale = []
         for i, event in enumerate(events):
-            if timestamps[i] < start_time or timestamps[i] >= stop_time:
-                continue
             if "Battery voltage" in event:
                 voltage_t.append(timestamps[i] - start_time)
                 voltage_y.append(int(event.split(" ")[3]))
                 battery_level.append(int(event.split(" ")[-1].split("/")[0]))
                 battery_scale.append(int(event.split(" ")[-1].split("/")[1]))
-            elif "Current" in event:
+            if timestamps[i] < start_time or timestamps[i] >= stop_time:
+                continue
+            if "Current" in event:
                 current_t.append(timestamps[i] - start_time)
                 current_y.append(int(event.split(" ")[-1]))
 
         assert all(battery_level[i] >= battery_level[i + 1] for i in range(len(battery_level) - 1))
         assert all(scale == battery_scale[0] for scale in battery_scale)
-        print("Battery level: {}/{} -> {}/{}".format(battery_level[0], battery_scale[0],
-                                                     battery_level[-1], battery_scale[0]))
+        print("{}: Battery level: {}/{} -> {}/{}".format(label, battery_level[0], battery_scale[0],
+                                                         battery_level[-1], battery_scale[0]))
 
         voltage_y = np.asarray(voltage_y) / 1000.
         current_y = np.asarray(current_y) / 1000000.
