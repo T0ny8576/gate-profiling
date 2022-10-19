@@ -154,15 +154,10 @@ public class MainActivity extends AppCompatActivity {
             }
 
             if (step.equals(WCA_FSM_START)) {
-                logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
-                inputFrameCount = 1;
                 Log.i(TAG, "Profiling started.");
             }
             step = toClientExtras.getStep();
             if (step.equals(WCA_FSM_END)) {
-                logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
-                logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
-                writeLog();
                 Log.i(TAG, "Profiling completed.");
             }
 
@@ -317,15 +312,6 @@ public class MainActivity extends AppCompatActivity {
 
         TextToSpeech.OnInitListener onInitListener = i -> {
             textToSpeech.setLanguage(Locale.US);
-
-            ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep(step).build();
-            InputFrame inputFrame = InputFrame.newBuilder()
-                    .setExtras(pack(toServerExtras))
-                    .build();
-
-            // We need to wait for textToSpeech to be initialized before asking for the first
-            // instruction.
-            serverComm.send(inputFrame, SOURCE, /* wait */ true);
         };
         this.textToSpeech = new TextToSpeech(this, onInitListener);
 
@@ -375,22 +361,34 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             inputFrameCount++;
-            ToServerExtras.ClientCmd clientCmd = prepCommand;
-            prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-            serverComm.sendSupplier(() -> {
-                ByteString jpegByteString = yuvToJPEGConverter.convert(image);
+            if (inputFrameCount == 1) {
+                logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
+                Log.i(TAG, "Profiling started.");
+            }
+            if (inputFrameCount == 2500) {
+                logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
+                logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
+                writeLog();
+                Log.i(TAG, "Profiling completed.");
+            }
+            if (toWait) {
+                ToServerExtras.ClientCmd clientCmd = prepCommand;
+                prepCommand = ToServerExtras.ClientCmd.NO_CMD;
+                serverComm.sendSupplier(() -> {
+                    ByteString jpegByteString = yuvToJPEGConverter.convert(image);
 
-                ToServerExtras toServerExtras = ToServerExtras.newBuilder()
-                        .setStep(MainActivity.this.step)
-                        .setClientCmd(clientCmd)
-                        .build();
+                    ToServerExtras toServerExtras = ToServerExtras.newBuilder()
+                            .setStep(MainActivity.this.step)
+                            .setClientCmd(clientCmd)
+                            .build();
 
-                return InputFrame.newBuilder()
-                        .setPayloadType(PayloadType.IMAGE)
-                        .addPayloads(jpegByteString)
-                        .setExtras(pack(toServerExtras))
-                        .build();
-            }, SOURCE, /* wait */ toWait);
+                    return InputFrame.newBuilder()
+                            .setPayloadType(PayloadType.IMAGE)
+                            .addPayloads(jpegByteString)
+                            .setExtras(pack(toServerExtras))
+                            .build();
+                }, SOURCE, /* wait */ true);
+            }
 
             // The image has either been sent or skipped. It is therefore safe to close the image.
             image.close();
