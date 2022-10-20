@@ -310,6 +310,11 @@ class InferenceEngine(cognitive_engine.Engine):
         next_processors = self._states_models.get_state(transition.next_state).processors
         if len(next_processors) == 1 and not _thumbs_up_required(next_processors[0]):
             to_client_extras.user_ready = owf_pb2.ToClientExtras.UserReady.DISABLE
+        elif len(next_processors) == 0:
+            # End state reached
+            logger.info("Client done. # Frame transmitted = %s", self._frame_tx_count)
+            to_client_extras.step = "WCA_FSM_END"
+            to_client_extras.user_ready = owf_pb2.ToClientExtras.UserReady.DISABLE
         else:
             to_client_extras.user_ready = owf_pb2.ToClientExtras.UserReady.CLEAR
 
@@ -418,12 +423,6 @@ class InferenceEngine(cognitive_engine.Engine):
             self._thumbs_up_found = False
             # ###############################################
             return self._result_wrapper_for_transition(state.always_transition)
-
-        # End state reached
-        if len(state.processors) == 0:
-            logger.info("Client done. # Frame transmitted = %s", self._frame_tx_count)
-            return self._result_wrapper_for(step="WCA_FSM_END",
-                                            user_ready=owf_pb2.ToClientExtras.UserReady.DISABLE)
 
         assert len(state.processors) == 1, 'wrong number of processors'
         processor = state.processors[0]
