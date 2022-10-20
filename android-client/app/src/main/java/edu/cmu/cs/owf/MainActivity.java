@@ -81,12 +81,14 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_CODE = 999;
     private static final String CALL_EXPERT = "CALL EXPERT";
     private static final String REPORT = "REPORT";
+    private static final String USER_READY = "READY";
     private static final String WCA_FSM_START = "WCA_FSM_START";
     private static final String WCA_FSM_END = "WCA_FSM_END";
     private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
 
     private String step = WCA_FSM_START;
+    private boolean readyForServer = true;
 
     private ServerComm serverComm;
     private YuvToJPEGConverter yuvToJPEGConverter;
@@ -102,7 +104,6 @@ public class MainActivity extends AppCompatActivity {
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
     private final String LOGFILE = sdf.format(new Date()) + ".txt";
-
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
     private BatteryManager mBatteryManager;
@@ -163,25 +164,12 @@ public class MainActivity extends AppCompatActivity {
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
                 writeLog();
-                Log.i(TAG, "Profiling completed.");
-            }
-
-            // Display or hide the thumbs-up icon
-            if (toClientExtras.getUserReady() == ToClientExtras.UserReady.SET) {
-                runOnUiThread(() -> {
-                    readyView.setVisibility(View.VISIBLE);
-                    readyTextView.setVisibility(View.VISIBLE);
-                });
-            } else if (toClientExtras.getUserReady() == ToClientExtras.UserReady.CLEAR) {
-                runOnUiThread(() -> {
-                    readyView.setVisibility(View.INVISIBLE);
-                    readyTextView.setVisibility(View.VISIBLE);
-                });
-            } else if (toClientExtras.getUserReady() == ToClientExtras.UserReady.DISABLE) {
+                readyForServer = false;
                 runOnUiThread(() -> {
                     readyView.setVisibility(View.INVISIBLE);
                     readyTextView.setVisibility(View.INVISIBLE);
                 });
+                Log.i(TAG, "Profiling completed.");
             }
 
         } catch (InvalidProtocolBufferException e) {
@@ -209,6 +197,14 @@ public class MainActivity extends AppCompatActivity {
         // Load the user guidance (audio, image/video) from the result wrapper
         for (ResultWrapper.Result result : resultWrapper.getResultsList()) {
             if (result.getPayloadType() == PayloadType.TEXT) {
+                if (readyForServer) {
+                    readyForServer = false;
+                    runOnUiThread(() -> {
+                        readyView.setVisibility(View.INVISIBLE);
+                        readyTextView.setVisibility(View.VISIBLE);
+                    });
+                }
+
                 ByteString dataString = result.getPayload();
                 String speech = dataString.toStringUtf8();
                 this.textToSpeech.speak(speech, TextToSpeech.QUEUE_FLUSH, null, null);
@@ -375,23 +371,24 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             inputFrameCount++;
-            ToServerExtras.ClientCmd clientCmd = prepCommand;
-            prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-            serverComm.sendSupplier(() -> {
-                ByteString jpegByteString = yuvToJPEGConverter.convert(image);
+            if (readyForServer) {
+                ToServerExtras.ClientCmd clientCmd = prepCommand;
+                prepCommand = ToServerExtras.ClientCmd.NO_CMD;
+                serverComm.sendSupplier(() -> {
+                    ByteString jpegByteString = yuvToJPEGConverter.convert(image);
 
-                ToServerExtras toServerExtras = ToServerExtras.newBuilder()
-                        .setStep(MainActivity.this.step)
-                        .setClientCmd(clientCmd)
-                        .build();
+                    ToServerExtras toServerExtras = ToServerExtras.newBuilder()
+                            .setStep(MainActivity.this.step)
+                            .setClientCmd(clientCmd)
+                            .build();
 
-                return InputFrame.newBuilder()
-                        .setPayloadType(PayloadType.IMAGE)
-                        .addPayloads(jpegByteString)
-                        .setExtras(pack(toServerExtras))
-                        .build();
-            }, SOURCE, /* wait */ toWait);
-
+                    return InputFrame.newBuilder()
+                            .setPayloadType(PayloadType.IMAGE)
+                            .addPayloads(jpegByteString)
+                            .setExtras(pack(toServerExtras))
+                            .build();
+                }, SOURCE, /* wait */ toWait);
+            }
             // The image has either been sent or skipped. It is therefore safe to close the image.
             image.close();
         }
@@ -419,13 +416,19 @@ public class MainActivity extends AppCompatActivity {
             final List<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
             Log.d(TAG, "ASR results: " + results.toString());
             if (results.size() > 0 && !results.get(0).isEmpty()) {
-                String spokenText = results.get(0);
+                String spokenText = results.get(0).toUpperCase();
                 // TODO: Use more keywords for starting Zoom or sending error report
-                if (spokenText.toUpperCase().contains(CALL_EXPERT)) {
+                if (spokenText.contains(USER_READY)) {
+                    readyForServer = true;
+                    runOnUiThread(() -> {
+                        readyView.setVisibility(View.VISIBLE);
+                        readyTextView.setVisibility(View.VISIBLE);
+                    });
+                } else if (spokenText.contains(CALL_EXPERT)) {
                     this.textToSpeech.speak("Calling expert now.",
                             TextToSpeech.QUEUE_FLUSH, null, null);
                     this.reqCommand = ToServerExtras.ClientCmd.ZOOM_START;
-                } else if (spokenText.toUpperCase().contains(REPORT)) {
+                } else if (spokenText.contains(REPORT)) {
                     this.reqCommand = ToServerExtras.ClientCmd.REPORT;
                     // TODO: Send error report
                     //  Let the server return this feedback message audio

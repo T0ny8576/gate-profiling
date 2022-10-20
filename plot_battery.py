@@ -92,20 +92,20 @@ def compare_power(profiles, output_file):
 
     for prof in profiles:
         print(prof[0] + ":")
-        ax.plot(prof[1], prof[2], marker=".", label=prof[0])
+        ax.plot(prof[1], prof[2], label=prof[0], linewidth=2)
         time_per_frame = prof[3] / prof[4]
         print("Total Input Frame: {}".format(prof[4]))
         if prof[5] is not None:
             print("Unique images: {}".format(prof[5]))
             print("Removal rate: {:.2%}".format(1. - prof[5] / prof[4]))
         print("Total time (s): {}".format(prof[3] / 1000.))
-        print("Time per frame (ms): {}".format(time_per_frame))
+        print("Time per frame (ms): {:.2f}".format(time_per_frame))
         average_power = np.sum(prof[2]) / len(prof[2])
-        print("Average power (W): {}".format(average_power))
+        print("Average power (W): {:.2f}".format(average_power))
         energy_per_frame = average_power * time_per_frame / 1000.
-        print("Energy per frame (J): {}".format(energy_per_frame))
+        print("Energy per frame (J): {:.4f}".format(energy_per_frame))
         total_energy = average_power * prof[3] / 1000.
-        print("Total energy (J): {}".format(total_energy))
+        print("Total energy (J): {:.2f}".format(total_energy))
         print()
 
     plt.title("Power Comparison")
@@ -119,5 +119,8 @@ if __name__ == "__main__":
                   "Google Glass - Cloudlet Thumbs-up Detection")
     prof_2 = draw("glass_idle.txt", "glass_idle.jpg", "Google Glass - Idle")
     prof_3 = draw("glass_no_gating.txt", "glass_no_gating.jpg", "Google Glass - No Gating")
-    prof_list = [prof_1, prof_2, prof_3]
+    prof_4 = draw("glass_toggle_switch.txt", "glass_toggle_switch.jpg", "Google Glass - Toggle Switch")
+    prof_5 = draw("glass_thumbsup.txt", "glass_thumbsup.jpg", "Google Glass - On-glass Thumbs-up Detection")
+    prof_6 = draw("glass_asr_gating.txt", "glass_asr_gating.jpg", "Google Glass - On-glass ASR Gating")
+    prof_list = [prof_1, prof_2, prof_3, prof_4, prof_5, prof_6]
     compare_power(prof_list, "power_comparison.jpg")
