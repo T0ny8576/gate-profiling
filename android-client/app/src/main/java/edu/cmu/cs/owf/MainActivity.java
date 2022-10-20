@@ -169,6 +169,11 @@ public class MainActivity extends AppCompatActivity {
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
                 writeLog();
+                readyForServer = false;
+                runOnUiThread(() -> {
+                    readyView.setVisibility(View.INVISIBLE);
+                    readyTextView.setVisibility(View.INVISIBLE);
+                });
                 Log.i(TAG, "Profiling completed.");
             }
 
@@ -197,12 +202,14 @@ public class MainActivity extends AppCompatActivity {
         // Load the user guidance (audio, image/video) from the result wrapper
         for (ResultWrapper.Result result : resultWrapper.getResultsList()) {
             if (result.getPayloadType() == PayloadType.TEXT) {
-                readyForServer = false;
-                currentStepStartTime = SystemClock.uptimeMillis();
-                runOnUiThread(() -> {
-                    readyView.setVisibility(View.INVISIBLE);
-                    readyTextView.setVisibility(View.VISIBLE);
-                });
+                if (readyForServer) {
+                    readyForServer = false;
+                    currentStepStartTime = SystemClock.uptimeMillis();
+                    runOnUiThread(() -> {
+                        readyView.setVisibility(View.INVISIBLE);
+                        readyTextView.setVisibility(View.VISIBLE);
+                    });
+                }
 
                 ByteString dataString = result.getPayload();
                 String speech = dataString.toStringUtf8();
