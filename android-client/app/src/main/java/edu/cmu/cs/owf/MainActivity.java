@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.SwitchCompat;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
@@ -17,8 +18,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.res.AssetManager;
-import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
 import android.os.BatteryManager;
 import android.os.Bundle;
@@ -95,10 +94,9 @@ public class MainActivity extends AppCompatActivity {
     private TextToSpeech textToSpeech;
     private ImageViewUpdater instructionViewUpdater;
     private ImageView instructionImage;
-    private ImageView readyView;
-    private TextView readyTextView;
     private VideoView instructionVideo;
     private File videoFile;
+    private SwitchCompat sendFramesSwitch;
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
     private final String LOGFILE = sdf.format(new Date()) + ".txt";
@@ -166,24 +164,6 @@ public class MainActivity extends AppCompatActivity {
                 Log.i(TAG, "Profiling completed.");
             }
 
-            // Display or hide the thumbs-up icon
-            if (toClientExtras.getUserReady() == ToClientExtras.UserReady.SET) {
-                runOnUiThread(() -> {
-                    readyView.setVisibility(View.VISIBLE);
-                    readyTextView.setVisibility(View.VISIBLE);
-                });
-            } else if (toClientExtras.getUserReady() == ToClientExtras.UserReady.CLEAR) {
-                runOnUiThread(() -> {
-                    readyView.setVisibility(View.INVISIBLE);
-                    readyTextView.setVisibility(View.VISIBLE);
-                });
-            } else if (toClientExtras.getUserReady() == ToClientExtras.UserReady.DISABLE) {
-                runOnUiThread(() -> {
-                    readyView.setVisibility(View.INVISIBLE);
-                    readyTextView.setVisibility(View.INVISIBLE);
-                });
-            }
-
         } catch (InvalidProtocolBufferException e) {
             Log.e(TAG, "Protobuf parse error", e);
         }
@@ -209,6 +189,10 @@ public class MainActivity extends AppCompatActivity {
         // Load the user guidance (audio, image/video) from the result wrapper
         for (ResultWrapper.Result result : resultWrapper.getResultsList()) {
             if (result.getPayloadType() == PayloadType.TEXT) {
+                // IMPORTANT: User must remember to click the toggle switch one more time after
+                // hearing the last audio instruction
+                runOnUiThread(() -> sendFramesSwitch.setChecked(false));
+
                 ByteString dataString = result.getPayload();
                 String speech = dataString.toStringUtf8();
                 this.textToSpeech.speak(speech, TextToSpeech.QUEUE_FLUSH, null, null);
@@ -252,22 +236,10 @@ public class MainActivity extends AppCompatActivity {
         videoFile = new File(this.getCacheDir(), VIDEO_NAME);
         PreviewView viewFinder = findViewById(R.id.viewFinder);
 
-        readyView = findViewById(R.id.readyView);
-        readyTextView = findViewById(R.id.readyTextView);
-        AssetManager assetManager = getAssets();
-        try
-        {
-            InputStream ins = assetManager.open("thumbs_up.png");
-            Drawable drawable = Drawable.createFromStream(ins, null);
-            readyView.setImageDrawable(drawable);
-            ins.close();
-        }
-        catch(IOException e) {
-            e.printStackTrace();
-        }
-
         instructionImage = findViewById(R.id.instructionImage);
         instructionViewUpdater = new ImageViewUpdater(instructionImage);
+
+        sendFramesSwitch = findViewById(R.id.sendFramesSwitch);
 
         instructionVideo = findViewById(R.id.instructionVideo);
 
@@ -375,6 +347,10 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             inputFrameCount++;
+            if (!sendFramesSwitch.isChecked()) {
+                image.close();
+                return;
+            }
             ToServerExtras.ClientCmd clientCmd = prepCommand;
             prepCommand = ToServerExtras.ClientCmd.NO_CMD;
             serverComm.sendSupplier(() -> {

@@ -119,5 +119,6 @@ if __name__ == "__main__":
                   "Google Glass - Cloudlet Thumbs-up Detection")
     prof_2 = draw("glass_idle.txt", "glass_idle.jpg", "Google Glass - Idle")
     prof_3 = draw("glass_no_gating.txt", "glass_no_gating.jpg", "Google Glass - No Gating")
-    prof_list = [prof_1, prof_2, prof_3]
+    prof_4 = draw("glass_toggle_switch.txt", "glass_toggle_switch.jpg", "Google Glass - Toggle Switch")
+    prof_list = [prof_1, prof_2, prof_3, prof_4]
     compare_power(prof_list, "power_comparison.jpg")
