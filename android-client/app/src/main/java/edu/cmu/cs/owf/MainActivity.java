@@ -189,8 +189,6 @@ public class MainActivity extends AppCompatActivity {
         // Load the user guidance (audio, image/video) from the result wrapper
         for (ResultWrapper.Result result : resultWrapper.getResultsList()) {
             if (result.getPayloadType() == PayloadType.TEXT) {
-                // IMPORTANT: User must remember to click the toggle switch one more time after
-                // hearing the last audio instruction
                 runOnUiThread(() -> sendFramesSwitch.setChecked(false));
 
                 ByteString dataString = result.getPayload();
