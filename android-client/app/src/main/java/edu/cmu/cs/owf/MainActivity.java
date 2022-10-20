@@ -18,6 +18,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.AssetManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
 import android.os.BatteryManager;
@@ -35,6 +37,7 @@ import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
@@ -103,7 +106,6 @@ public class MainActivity extends AppCompatActivity {
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
     private final String LOGFILE = sdf.format(new Date()) + ".txt";
 
-
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
     private BatteryManager mBatteryManager;
     private BroadcastReceiver batteryReceiver;
@@ -111,6 +113,10 @@ public class MainActivity extends AppCompatActivity {
     private Timer timer;
     private int inputFrameCount = 0;
     private static final long TIMER_PERIOD = 1000;
+
+    private ThumbsUpDetection thumbsUpDetector;
+    private boolean readyForServer = true;
+    private long currentStepStartTime = 0;
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -166,24 +172,6 @@ public class MainActivity extends AppCompatActivity {
                 Log.i(TAG, "Profiling completed.");
             }
 
-            // Display or hide the thumbs-up icon
-            if (toClientExtras.getUserReady() == ToClientExtras.UserReady.SET) {
-                runOnUiThread(() -> {
-                    readyView.setVisibility(View.VISIBLE);
-                    readyTextView.setVisibility(View.VISIBLE);
-                });
-            } else if (toClientExtras.getUserReady() == ToClientExtras.UserReady.CLEAR) {
-                runOnUiThread(() -> {
-                    readyView.setVisibility(View.INVISIBLE);
-                    readyTextView.setVisibility(View.VISIBLE);
-                });
-            } else if (toClientExtras.getUserReady() == ToClientExtras.UserReady.DISABLE) {
-                runOnUiThread(() -> {
-                    readyView.setVisibility(View.INVISIBLE);
-                    readyTextView.setVisibility(View.INVISIBLE);
-                });
-            }
-
         } catch (InvalidProtocolBufferException e) {
             Log.e(TAG, "Protobuf parse error", e);
         }
@@ -209,6 +197,13 @@ public class MainActivity extends AppCompatActivity {
         // Load the user guidance (audio, image/video) from the result wrapper
         for (ResultWrapper.Result result : resultWrapper.getResultsList()) {
             if (result.getPayloadType() == PayloadType.TEXT) {
+                readyForServer = false;
+                currentStepStartTime = SystemClock.uptimeMillis();
+                runOnUiThread(() -> {
+                    readyView.setVisibility(View.INVISIBLE);
+                    readyTextView.setVisibility(View.VISIBLE);
+                });
+
                 ByteString dataString = result.getPayload();
                 String speech = dataString.toStringUtf8();
                 this.textToSpeech.speak(speech, TextToSpeech.QUEUE_FLUSH, null, null);
@@ -331,8 +326,24 @@ public class MainActivity extends AppCompatActivity {
 
         yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
-    }
 
+        thumbsUpDetector = new ThumbsUpDetection(this);
+        thumbsUpDetector.hands.setResultListener(
+                handsResult -> {
+                    if (!handsResult.multiHandLandmarks().isEmpty()) {
+                        if (handsResult.timestamp() > currentStepStartTime &&
+                                ThumbsUpDetection.detectThumbsUp(handsResult)) {
+                            readyForServer = true;
+                            runOnUiThread(() -> {
+                                readyView.setVisibility(View.VISIBLE);
+                                readyTextView.setVisibility(View.VISIBLE);
+                            });
+                        }
+                    }
+                });
+        thumbsUpDetector.hands.setErrorListener((message, e) -> Log.e(TAG, "MediaPipe Hands error:" + message));
+    }
+    
     class LogTimerTask extends TimerTask {
         @Override
         public void run() {
@@ -375,22 +386,29 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             inputFrameCount++;
-            ToServerExtras.ClientCmd clientCmd = prepCommand;
-            prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-            serverComm.sendSupplier(() -> {
-                ByteString jpegByteString = yuvToJPEGConverter.convert(image);
 
-                ToServerExtras toServerExtras = ToServerExtras.newBuilder()
-                        .setStep(MainActivity.this.step)
-                        .setClientCmd(clientCmd)
-                        .build();
+            if (readyForServer) {
+                ToServerExtras.ClientCmd clientCmd = prepCommand;
+                prepCommand = ToServerExtras.ClientCmd.NO_CMD;
+                serverComm.sendSupplier(() -> {
+                    ByteString jpegByteString = yuvToJPEGConverter.convert(image);
 
-                return InputFrame.newBuilder()
-                        .setPayloadType(PayloadType.IMAGE)
-                        .addPayloads(jpegByteString)
-                        .setExtras(pack(toServerExtras))
-                        .build();
-            }, SOURCE, /* wait */ toWait);
+                    ToServerExtras toServerExtras = ToServerExtras.newBuilder()
+                            .setStep(MainActivity.this.step)
+                            .setClientCmd(clientCmd)
+                            .build();
+
+                    return InputFrame.newBuilder()
+                            .setPayloadType(PayloadType.IMAGE)
+                            .addPayloads(jpegByteString)
+                            .setExtras(pack(toServerExtras))
+                            .build();
+                }, SOURCE, /* wait */ toWait);
+            } else {
+                Bitmap bitmapImage = BitmapFactory.decodeStream(
+                        new ByteArrayInputStream(yuvToJPEGConverter.convert(image).toByteArray()));
+                thumbsUpDetector.hands.send(bitmapImage, SystemClock.uptimeMillis());
+            }
 
             // The image has either been sent or skipped. It is therefore safe to close the image.
             image.close();

@@ -76,4 +76,8 @@ dependencies {
     implementation "androidx.camera:camera-view:1.0.0-alpha22"
     implementation project(':commonlib')
     implementation project(':mobilertc')
+
+    // MediaPipe Hands Solution
+    implementation 'com.google.mediapipe:solution-core:latest.release'
+    implementation 'com.google.mediapipe:hands:latest.release'
 }
