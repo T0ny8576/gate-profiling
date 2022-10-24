@@ -101,8 +101,7 @@ public class MainActivity extends AppCompatActivity {
     private File videoFile;
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
-    private final String LOGFILE = sdf.format(new Date()) + ".txt";
-
+    private final String LOGFILE = "IDLE-" + sdf.format(new Date()) + ".txt";
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
     private BatteryManager mBatteryManager;
