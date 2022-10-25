@@ -115,6 +115,9 @@ public class MainActivity extends AppCompatActivity {
     private Timer timer;
     private int inputFrameCount = 0;
     private static final long TIMER_PERIOD = 1000;
+    private static final int DIFF_THRESHOLD = 2;
+    private long lastPHash = 0;
+    private int uniqueCount = 0;
 
     private ThumbsUpDetection thumbsUpDetector;
     private boolean readyForServer = true;
@@ -169,6 +172,7 @@ public class MainActivity extends AppCompatActivity {
             step = toClientExtras.getStep();
             if (step.equals(WCA_FSM_END)) {
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
+                logList.add(TAG + ": Unique Images: " + uniqueCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
                 writeLog();
                 readyForServer = false;
@@ -397,7 +401,16 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             inputFrameCount++;
-
+            Bitmap bitmapImage = BitmapFactory.decodeStream(
+                    new ByteArrayInputStream(yuvToJPEGConverter.convert(image).toByteArray()));
+            long curPHash = ImagePHash.pHash(bitmapImage);
+            if (ImagePHash.distance(lastPHash, curPHash) >= DIFF_THRESHOLD) {
+                uniqueCount++;
+                lastPHash = curPHash;
+            } else if (!toWait) {
+                image.close();
+                return;
+            }
             if (readyForServer) {
                 ToServerExtras.ClientCmd clientCmd = prepCommand;
                 prepCommand = ToServerExtras.ClientCmd.NO_CMD;
@@ -416,8 +429,6 @@ public class MainActivity extends AppCompatActivity {
                             .build();
                 }, SOURCE, /* wait */ toWait);
             } else {
-                Bitmap bitmapImage = BitmapFactory.decodeStream(
-                        new ByteArrayInputStream(yuvToJPEGConverter.convert(image).toByteArray()));
                 thumbsUpDetector.hands.send(bitmapImage, SystemClock.uptimeMillis());
             }
 
