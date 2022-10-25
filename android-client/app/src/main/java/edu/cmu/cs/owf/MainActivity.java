@@ -46,6 +46,7 @@ import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import edu.cmu.cs.gabriel.camera.CameraCapture;
@@ -99,9 +100,10 @@ public class MainActivity extends AppCompatActivity {
     private SwitchCompat sendFramesSwitch;
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
-    private final String LOGFILE = "SWITCH" + sdf.format(new Date()) + ".txt";
+    private final String LOGFILE = "SWITCH-" + sdf.format(new Date()) + ".txt";
 
-    private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
+    final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
+    private AtomicBoolean logProfiling = new AtomicBoolean(true);
     private BatteryManager mBatteryManager;
     private BroadcastReceiver batteryReceiver;
     private FileWriter logFileWriter;
@@ -261,13 +263,15 @@ public class MainActivity extends AppCompatActivity {
         batteryReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                int voltage = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, Integer.MIN_VALUE);
-                int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, Integer.MIN_VALUE);
-                int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, Integer.MIN_VALUE);
-                String voltageMsg = TAG + ": Time: " + SystemClock.uptimeMillis() +
-                        "\tBattery voltage = " + voltage +
-                        " Level = " + level + "/" + scale + "\n";
-                logList.add(voltageMsg);
+                if (logProfiling.get()) {
+                    int voltage = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, Integer.MIN_VALUE);
+                    int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, Integer.MIN_VALUE);
+                    int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, Integer.MIN_VALUE);
+                    String voltageMsg = TAG + ": Time: " + SystemClock.uptimeMillis() +
+                            "\tBattery voltage = " + voltage +
+                            " Level = " + level + "/" + scale + "\n";
+                    logList.add(voltageMsg);
+                }
             }
         };
         registerReceiver(batteryReceiver, intentFilter);
@@ -315,7 +319,7 @@ public class MainActivity extends AppCompatActivity {
     private void writeLog() {
         timer.cancel();
         timer.purge();
-        unregisterReceiver(batteryReceiver);
+        logProfiling.set(false);
         try {
             for (String logString: logList) {
                 logFileWriter.write(logString);
@@ -371,9 +375,11 @@ public class MainActivity extends AppCompatActivity {
     };
 
     @Override
-    protected void onDestroy() {
-        super.onDestroy();
+    protected void onStop() {
+        super.onStop();
+        unregisterReceiver(batteryReceiver);
         cameraCapture.shutdown();
+        // TODO: Disconnect from the server elegantly?
         // TODO: Clean up the Zoom session?
     }
 
