@@ -416,8 +416,8 @@ public class MainActivity extends AppCompatActivity {
     };
 
     @Override
-    protected void onStop() {
-        super.onStop();
+    protected void onDestroy() {
+        super.onDestroy();
         unregisterReceiver(batteryReceiver);
         cameraCapture.shutdown();
         // TODO: Disconnect from the server elegantly?
