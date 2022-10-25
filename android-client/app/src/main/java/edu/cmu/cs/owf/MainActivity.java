@@ -18,6 +18,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.AssetManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
 import android.os.BatteryManager;
@@ -35,6 +37,7 @@ import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
@@ -103,14 +106,16 @@ public class MainActivity extends AppCompatActivity {
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
     private final String LOGFILE = "NO-GATING-" + sdf.format(new Date()) + ".txt";
 
-
-    private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
+    final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
     private BatteryManager mBatteryManager;
     private BroadcastReceiver batteryReceiver;
     private FileWriter logFileWriter;
     private Timer timer;
     private int inputFrameCount = 0;
     private static final long TIMER_PERIOD = 1000;
+    private static final int DIFF_THRESHOLD = 2;
+    private long lastPHash = 0;
+    private int uniqueCount = 0;
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -161,6 +166,7 @@ public class MainActivity extends AppCompatActivity {
             step = toClientExtras.getStep();
             if (step.equals(WCA_FSM_END)) {
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
+                logList.add(TAG + ": Unique Images: " + uniqueCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
                 writeLog();
                 Log.i(TAG, "Profiling completed.");
@@ -375,6 +381,16 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             inputFrameCount++;
+            Bitmap bitmapImage = BitmapFactory.decodeStream(
+                    new ByteArrayInputStream(yuvToJPEGConverter.convert(image).toByteArray()));
+            long curPHash = ImagePHash.pHash(bitmapImage);
+            if (ImagePHash.distance(lastPHash, curPHash) >= DIFF_THRESHOLD) {
+                uniqueCount++;
+                lastPHash = curPHash;
+            } else if (!toWait) {
+                image.close();
+                return;
+            }
             ToServerExtras.ClientCmd clientCmd = prepCommand;
             prepCommand = ToServerExtras.ClientCmd.NO_CMD;
             serverComm.sendSupplier(() -> {
