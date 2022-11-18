@@ -115,12 +115,12 @@ def compare_power(profiles, output_file):
 
 
 if __name__ == "__main__":
-    prof_1 = draw("glass_cloudlet_thumbsup.txt", "glass_cloudlet_thumbsup.jpg",
+    prof_1 = draw("glass_idle.txt", "glass_idle.jpg", "Google Glass - Baseline")
+    prof_2 = draw("glass_no_gating.txt", "glass_no_gating.jpg", "Google Glass - No Gating")
+    prof_3 = draw("glass_cloudlet_thumbsup.txt", "glass_cloudlet_thumbsup.jpg",
                   "Google Glass - Cloudlet Thumbs-up Detection")
-    prof_2 = draw("glass_idle.txt", "glass_idle.jpg", "Google Glass - Idle")
-    prof_3 = draw("glass_no_gating.txt", "glass_no_gating.jpg", "Google Glass - No Gating")
-    prof_4 = draw("glass_toggle_switch.txt", "glass_toggle_switch.jpg", "Google Glass - Toggle Switch")
-    prof_5 = draw("glass_thumbsup.txt", "glass_thumbsup.jpg", "Google Glass - On-glass Thumbs-up Detection")
-    prof_6 = draw("glass_asr_gating.txt", "glass_asr_gating.jpg", "Google Glass - On-glass ASR Gating")
+    prof_4 = draw("glass_thumbsup.txt", "glass_thumbsup.jpg", "Google Glass - On-device Thumbs-up Detection")
+    prof_5 = draw("glass_toggle_switch.txt", "glass_toggle_switch.jpg", "Google Glass - Toggle Switch")
+    prof_6 = draw("glass_asr_gating.txt", "glass_asr_gating.jpg", "Google Glass - On-device ASR Gating")
     prof_list = [prof_1, prof_2, prof_3, prof_4, prof_5, prof_6]
     compare_power(prof_list, "power_comparison.jpg")
