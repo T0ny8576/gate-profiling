@@ -228,6 +228,7 @@ class InferenceEngine(cognitive_engine.Engine):
 
     def __init__(self, fsm_file_path):
         self._frame_tx_count = 0
+        self._frame_tx_after_thumbs = 0
         # ############################################ Temp fix
         # TODO: Add them in the protobuf message to make the server stateless
         self.count_ = 0
@@ -312,7 +313,8 @@ class InferenceEngine(cognitive_engine.Engine):
             to_client_extras.user_ready = owf_pb2.ToClientExtras.UserReady.DISABLE
         elif len(next_processors) == 0:
             # End state reached
-            logger.info("Client done. # Frame transmitted = %s", self._frame_tx_count)
+            logger.info("Client done. # Frames transmitted = %s, # Frames after thumbs-up = %s",
+                        self._frame_tx_count, self._frame_tx_after_thumbs)
             to_client_extras.step = "WCA_FSM_END"
             to_client_extras.user_ready = owf_pb2.ToClientExtras.UserReady.DISABLE
         else:
@@ -399,6 +401,7 @@ class InferenceEngine(cognitive_engine.Engine):
         if step == "WCA_FSM_START" or not step:
             state = self._states_models.get_start_state()
             self._frame_tx_count = 0
+            self._frame_tx_after_thumbs = 0
         elif step == "WCA_FSM_END":
             return self._result_wrapper_for(step,
                                             user_ready=owf_pb2.ToClientExtras.UserReady.DISABLE)
@@ -456,6 +459,8 @@ class InferenceEngine(cognitive_engine.Engine):
             if not self._thumbs_up_found:
                 # User not ready yet, return without running the two phase object detection
                 return self._result_wrapper_for(step)
+            else:
+                self._frame_tx_after_thumbs += 1
         # ###############################################
 
         # Insert a new axis to make an input tensor of shape (1, h, w, channel)
