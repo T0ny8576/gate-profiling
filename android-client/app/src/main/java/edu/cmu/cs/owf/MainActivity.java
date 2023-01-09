@@ -312,7 +312,6 @@ public class MainActivity extends AppCompatActivity {
                 consumer, BuildConfig.GABRIEL_HOST, PORT, getApplication(), onDisconnect);
 
         TextToSpeech.OnInitListener onInitListener = i -> {
-            textToSpeech.setLanguage(Locale.US);
 
             ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep(step).build();
             InputFrame inputFrame = InputFrame.newBuilder()
