@@ -13,16 +13,12 @@ import androidx.camera.core.ImageProxy;
 import androidx.camera.view.PreviewView;
 
 import android.app.AlertDialog;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
-import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.speech.RecognizerIntent;
@@ -107,8 +103,6 @@ public class MainActivity extends AppCompatActivity {
     private final String LOGFILE = "THUMBSUP-" + sdf.format(new Date()) + ".txt";
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
-    private BatteryManager mBatteryManager;
-    private BroadcastReceiver batteryReceiver;
     private FileWriter logFileWriter;
     private Timer timer;
     private int inputFrameCount = 0;
@@ -290,26 +284,6 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
 
-        IntentFilter intentFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
-        batteryReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                int voltage = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, Integer.MIN_VALUE);
-                int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, Integer.MIN_VALUE);
-                int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, Integer.MIN_VALUE);
-                String voltageMsg = TAG + ": Time: " + SystemClock.uptimeMillis() +
-                        "\tBattery voltage = " + voltage +
-                        " Level = " + level + "/" + scale + "\n";
-                logList.add(voltageMsg);
-            }
-        };
-        registerReceiver(batteryReceiver, intentFilter);
-
-        mBatteryManager = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
-
-        timer = new Timer();
-        timer.scheduleAtFixedRate(new LogTimerTask(), 0, TIMER_PERIOD);
-
         Consumer<ErrorType> onDisconnect = errorType -> {
             Log.e(TAG, "Disconnect Error: " + errorType.name());
             finish();
@@ -333,6 +307,9 @@ public class MainActivity extends AppCompatActivity {
         yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
 
+//        timer = new Timer();
+//        timer.scheduleAtFixedRate(new LogTimerTask(), 0, TIMER_PERIOD);
+
         thumbsUpDetector = new ThumbsUpDetection(this);
         thumbsUpDetector.hands.setResultListener(
                 handsResult -> {
@@ -350,20 +327,15 @@ public class MainActivity extends AppCompatActivity {
         thumbsUpDetector.hands.setErrorListener((message, e) -> Log.e(TAG, "MediaPipe Hands error:" + message));
     }
     
-    class LogTimerTask extends TimerTask {
-        @Override
-        public void run() {
-            int current = mBatteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
-            String testMag = TAG + ": Time: " + SystemClock.uptimeMillis() +
-                    "\tCurrent: " + current + "\n";
-            logList.add(testMag);
-        }
-    }
+//    class LogTimerTask extends TimerTask {
+//        @Override
+//        public void run() {
+//        }
+//    }
 
     private void writeLog() {
         timer.cancel();
         timer.purge();
-        unregisterReceiver(batteryReceiver);
         try {
             for (String logString: logList) {
                 logFileWriter.write(logString);
@@ -386,6 +358,7 @@ public class MainActivity extends AppCompatActivity {
     final private ImageAnalysis.Analyzer analyzer = new ImageAnalysis.Analyzer() {
         @Override
         public void analyze(@NonNull ImageProxy image) {
+            Log.w(TAG, "analyzer: " + SystemClock.uptimeMillis());
             boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
             if (step.equals(WCA_FSM_END) && !toWait) {
                 image.close();
@@ -393,12 +366,26 @@ public class MainActivity extends AppCompatActivity {
             }
             inputFrameCount++;
 
+            ByteString jpegByteString = yuvToJPEGConverter.convert(image);
+            byte[] jpegBytes = jpegByteString.toByteArray();
+            long jpegTime = SystemClock.uptimeMillis();
+            try {
+                File jpegFile = new File(getExternalFilesDir(null),
+                        "THUMBSUP-" + jpegTime + ".jpg");
+                if (jpegFile.exists()) {
+                    jpegFile.delete();
+                }
+                FileOutputStream fos = new FileOutputStream(jpegFile.getPath());
+                fos.write(jpegBytes);
+                fos.close();
+            } catch (IOException e) {
+                Log.w(TAG, "Saving image failed: " + jpegTime);
+            }
+
             if (readyForServer) {
                 ToServerExtras.ClientCmd clientCmd = prepCommand;
                 prepCommand = ToServerExtras.ClientCmd.NO_CMD;
                 serverComm.sendSupplier(() -> {
-                    ByteString jpegByteString = yuvToJPEGConverter.convert(image);
-
                     ToServerExtras toServerExtras = ToServerExtras.newBuilder()
                             .setStep(MainActivity.this.step)
                             .setClientCmd(clientCmd)
@@ -412,7 +399,7 @@ public class MainActivity extends AppCompatActivity {
                 }, SOURCE, /* wait */ toWait);
             } else {
                 Bitmap bitmapImage = BitmapFactory.decodeStream(
-                        new ByteArrayInputStream(yuvToJPEGConverter.convert(image).toByteArray()));
+                        new ByteArrayInputStream(jpegBytes));
                 thumbsUpDetector.hands.send(bitmapImage, SystemClock.uptimeMillis());
             }
 
