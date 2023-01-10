@@ -13,14 +13,10 @@ import androidx.camera.core.ImageProxy;
 import androidx.camera.view.PreviewView;
 
 import android.app.AlertDialog;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.res.AssetManager;
 import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
-import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.speech.RecognizerIntent;
@@ -105,8 +101,6 @@ public class MainActivity extends AppCompatActivity {
 
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
-    private BatteryManager mBatteryManager;
-    private BroadcastReceiver batteryReceiver;
     private FileWriter logFileWriter;
     private Timer timer;
     private int inputFrameCount = 0;
@@ -288,25 +282,8 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
 
-        IntentFilter intentFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
-        batteryReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                int voltage = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, Integer.MIN_VALUE);
-                int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, Integer.MIN_VALUE);
-                int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, Integer.MIN_VALUE);
-                String voltageMsg = TAG + ": Time: " + SystemClock.uptimeMillis() +
-                        "\tBattery voltage = " + voltage +
-                        " Level = " + level + "/" + scale + "\n";
-                logList.add(voltageMsg);
-            }
-        };
-        registerReceiver(batteryReceiver, intentFilter);
-
-        mBatteryManager = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
-
-        timer = new Timer();
-        timer.scheduleAtFixedRate(new LogTimerTask(), 0, TIMER_PERIOD);
+//        timer = new Timer();
+//        timer.scheduleAtFixedRate(new LogTimerTask(), 0, TIMER_PERIOD);
 
         Consumer<ErrorType> onDisconnect = errorType -> {
             Log.e(TAG, "Disconnect Error: " + errorType.name());
@@ -332,20 +309,16 @@ public class MainActivity extends AppCompatActivity {
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
     }
 
-    class LogTimerTask extends TimerTask {
-        @Override
-        public void run() {
-            int current = mBatteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
-            String testMag = TAG + ": Time: " + SystemClock.uptimeMillis() +
-                    "\tCurrent: " + current + "\n";
-            logList.add(testMag);
-        }
-    }
+//    class LogTimerTask extends TimerTask {
+//        @Override
+//        public void run() {
+//        }
+//    }
 
     private void writeLog() {
         timer.cancel();
         timer.purge();
-        unregisterReceiver(batteryReceiver);
+//        unregisterReceiver(batteryReceiver);
         try {
             for (String logString: logList) {
                 logFileWriter.write(logString);
@@ -374,11 +347,26 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             inputFrameCount++;
+            Log.w(TAG, "analyzer: " + SystemClock.uptimeMillis());
+            ByteString jpegByteString = yuvToJPEGConverter.convert(image);
+            byte[] jpegBytes = jpegByteString.toByteArray();
+            long jpegTime = SystemClock.uptimeMillis();
+            try {
+                File jpegFile = new File(getExternalFilesDir(null),
+                        "THUMBSUP-" + jpegTime + ".jpg");
+                if (jpegFile.exists()) {
+                    jpegFile.delete();
+                }
+                FileOutputStream fos = new FileOutputStream(jpegFile.getPath());
+                fos.write(jpegBytes);
+                fos.close();
+            } catch (IOException e) {
+                Log.w(TAG, "Saving image failed: " + jpegTime);
+            }
+
             ToServerExtras.ClientCmd clientCmd = prepCommand;
             prepCommand = ToServerExtras.ClientCmd.NO_CMD;
             serverComm.sendSupplier(() -> {
-                ByteString jpegByteString = yuvToJPEGConverter.convert(image);
-
                 ToServerExtras toServerExtras = ToServerExtras.newBuilder()
                         .setStep(MainActivity.this.step)
                         .setClientCmd(clientCmd)
