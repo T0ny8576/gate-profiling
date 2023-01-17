@@ -1,5 +1,7 @@
 package edu.cmu.cs.owf;
 
+import static android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION;
+
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
@@ -22,8 +24,11 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
+import android.net.Uri;
 import android.os.BatteryManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.SystemClock;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
@@ -39,14 +44,19 @@ import com.google.protobuf.InvalidProtocolBufferException;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.Scanner;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -118,6 +128,12 @@ public class MainActivity extends AppCompatActivity {
     private boolean readyForServer = true;
     private long currentStepStartTime = 0;
 
+    private long syncStartTime;
+    private long realStartTime;
+    private int curFrameIndex = 0;
+    private final File recordFolder = new File("/sdcard/traces/2023-01-17-11-27-33-EST");
+    private ArrayList<Long> frameTimeArr = new ArrayList<>();
+
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             new ActivityResultCallback<ActivityResult>() {
@@ -160,7 +176,8 @@ public class MainActivity extends AppCompatActivity {
             }
 
             if (step.equals(WCA_FSM_START)) {
-                logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
+                realStartTime = SystemClock.uptimeMillis();
+                logList.add(TAG + ": Start: " + realStartTime + "\n");
                 inputFrameCount = 1;
                 Log.i(TAG, "Profiling started.");
             }
@@ -251,6 +268,27 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
+                startActivity(intent);
+            }
+        }
+
+        // Permissions for ODG, Magicleap, and Google Glass
+//        String[] permissions = new String[] {
+//                Manifest.permission.INTERNET, Manifest.permission.READ_EXTERNAL_STORAGE,
+//                Manifest.permission.WRITE_EXTERNAL_STORAGE};
+//        for (String permission : permissions) {
+//            if (ContextCompat.checkSelfPermission(this, permission) !=
+//                    PackageManager.PERMISSION_GRANTED) {
+//                requestPermissions(permissions, 0);
+//                break;
+//            }
+//        }
+
         videoFile = new File(this.getCacheDir(), VIDEO_NAME);
         PreviewView viewFinder = findViewById(R.id.viewFinder);
 
@@ -290,6 +328,22 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
 
+        try {
+            Scanner sc = new Scanner(new File(recordFolder, "DEMO-2023-01-17-11-27-33-EST.txt"));
+            if (sc.hasNextLine()) {
+                syncStartTime = Long.parseLong(sc.nextLine().split(": ")[2]);
+                Log.w(TAG, "Syncing start time: " + syncStartTime);
+            }
+            while (sc.hasNextLine()) {
+                String[] frameRec = sc.nextLine().split(",");
+                if (frameRec.length == 4) {
+                    frameTimeArr.add(Long.parseLong(frameRec[0]));
+                }
+            }
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+
         IntentFilter intentFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
         batteryReceiver = new BroadcastReceiver() {
             @Override
@@ -318,7 +372,6 @@ public class MainActivity extends AppCompatActivity {
                 consumer, BuildConfig.GABRIEL_HOST, PORT, getApplication(), onDisconnect);
 
         TextToSpeech.OnInitListener onInitListener = i -> {
-            textToSpeech.setLanguage(Locale.US);
 
             ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep(step).build();
             InputFrame inputFrame = InputFrame.newBuilder()
@@ -387,38 +440,52 @@ public class MainActivity extends AppCompatActivity {
     final private ImageAnalysis.Analyzer analyzer = new ImageAnalysis.Analyzer() {
         @Override
         public void analyze(@NonNull ImageProxy image) {
+            image.close();
+
             boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
             if (step.equals(WCA_FSM_END) && !toWait) {
-                image.close();
                 return;
             }
+
             inputFrameCount++;
-
-            if (readyForServer) {
-                ToServerExtras.ClientCmd clientCmd = prepCommand;
-                prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-                serverComm.sendSupplier(() -> {
-                    ByteString jpegByteString = yuvToJPEGConverter.convert(image);
-
-                    ToServerExtras toServerExtras = ToServerExtras.newBuilder()
-                            .setStep(MainActivity.this.step)
-                            .setClientCmd(clientCmd)
-                            .build();
-
-                    return InputFrame.newBuilder()
-                            .setPayloadType(PayloadType.IMAGE)
-                            .addPayloads(jpegByteString)
-                            .setExtras(pack(toServerExtras))
-                            .build();
-                }, SOURCE, /* wait */ toWait);
-            } else {
-                Bitmap bitmapImage = BitmapFactory.decodeStream(
-                        new ByteArrayInputStream(yuvToJPEGConverter.convert(image).toByteArray()));
-                thumbsUpDetector.hands.send(bitmapImage, SystemClock.uptimeMillis());
+            // Get most concurrent frame from the recorded trace
+            while (curFrameIndex + 1 < frameTimeArr.size()) {
+                if (syncStartTime + SystemClock.uptimeMillis() - realStartTime > frameTimeArr.get(curFrameIndex + 1)) {
+                    curFrameIndex++;
+                } else {
+                    break;
+                }
             }
+            File jpegFrame = new File(recordFolder, "THUMBSUP-" + frameTimeArr.get(curFrameIndex) + ".jpg");
+            try {
+                byte[] jpegBytes = Files.readAllBytes(jpegFrame.toPath());
 
-            // The image has either been sent or skipped. It is therefore safe to close the image.
-            image.close();
+                if (readyForServer) {
+                    ToServerExtras.ClientCmd clientCmd = prepCommand;
+                    prepCommand = ToServerExtras.ClientCmd.NO_CMD;
+                    serverComm.sendSupplier(() -> {
+                        ByteString jpegByteString = ByteString.copyFrom(jpegBytes);
+
+                        ToServerExtras toServerExtras = ToServerExtras.newBuilder()
+                                .setStep(MainActivity.this.step)
+                                .setClientCmd(clientCmd)
+                                .build();
+
+                        return InputFrame.newBuilder()
+                                .setPayloadType(PayloadType.IMAGE)
+                                .addPayloads(jpegByteString)
+                                .setExtras(pack(toServerExtras))
+                                .build();
+                    }, SOURCE, /* wait */ toWait);
+                } else {
+                    Bitmap bitmapImage = BitmapFactory.decodeStream(
+                            new ByteArrayInputStream(jpegBytes));
+                    thumbsUpDetector.hands.send(bitmapImage, SystemClock.uptimeMillis());
+                }
+
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
     };
 
