@@ -131,7 +131,8 @@ public class MainActivity extends AppCompatActivity {
     private long syncStartTime;
     private long realStartTime;
     private int curFrameIndex = 0;
-    private final File recordFolder = new File("/sdcard/traces/2023-01-17-11-27-33-EST");
+    private final File recordFolder = new File("/sdcard/traces/2023-01-23-14-45-40-EST");
+    private final String recordFile = "DEMO-2023-01-23-14-45-40-EST.txt";
     private ArrayList<Long> frameTimeArr = new ArrayList<>();
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
@@ -268,16 +269,16 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
-                startActivity(intent);
-            }
-        }
+//        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
+//        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+//            if (!Environment.isExternalStorageManager()) {
+//                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+//                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
+//                startActivity(intent);
+//            }
+//        }
 
-        // Permissions for ODG, Magicleap, and Google Glass
+//        // Permissions for ODG, Magicleap, and Google Glass
 //        String[] permissions = new String[] {
 //                Manifest.permission.INTERNET, Manifest.permission.READ_EXTERNAL_STORAGE,
 //                Manifest.permission.WRITE_EXTERNAL_STORAGE};
@@ -329,7 +330,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         try {
-            Scanner sc = new Scanner(new File(recordFolder, "DEMO-2023-01-17-11-27-33-EST.txt"));
+            Scanner sc = new Scanner(new File(recordFolder, recordFile));
             if (sc.hasNextLine()) {
                 syncStartTime = Long.parseLong(sc.nextLine().split(": ")[2]);
                 Log.w(TAG, "Syncing start time: " + syncStartTime);
