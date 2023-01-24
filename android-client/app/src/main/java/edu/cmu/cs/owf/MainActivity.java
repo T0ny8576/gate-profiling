@@ -269,14 +269,14 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-//        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
-//        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-//            if (!Environment.isExternalStorageManager()) {
-//                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-//                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
-//                startActivity(intent);
-//            }
-//        }
+        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
+                startActivity(intent);
+            }
+        }
 
 //        // Permissions for ODG, Magicleap, and Google Glass
 //        String[] permissions = new String[] {
@@ -372,18 +372,21 @@ public class MainActivity extends AppCompatActivity {
         serverComm = ServerComm.createServerComm(
                 consumer, BuildConfig.GABRIEL_HOST, PORT, getApplication(), onDisconnect);
 
-        TextToSpeech.OnInitListener onInitListener = i -> {
+        TextToSpeech.OnInitListener onInitListener = status -> {
+            if (status != TextToSpeech.ERROR) {
+                ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep(step).build();
+                InputFrame inputFrame = InputFrame.newBuilder()
+                        .setExtras(pack(toServerExtras))
+                        .build();
 
-            ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep(step).build();
-            InputFrame inputFrame = InputFrame.newBuilder()
-                    .setExtras(pack(toServerExtras))
-                    .build();
-
-            // We need to wait for textToSpeech to be initialized before asking for the first
-            // instruction.
-            serverComm.send(inputFrame, SOURCE, /* wait */ true);
+                // We need to wait for textToSpeech to be initialized before asking for the first
+                // instruction.
+                serverComm.send(inputFrame, SOURCE, /* wait */ true);
+            } else {
+                Log.e(TAG, "TextToSpeech initialization failed with status " + status);
+            }
         };
-        this.textToSpeech = new TextToSpeech(this, onInitListener);
+        this.textToSpeech = new TextToSpeech(getApplicationContext(), onInitListener);
 
         yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
