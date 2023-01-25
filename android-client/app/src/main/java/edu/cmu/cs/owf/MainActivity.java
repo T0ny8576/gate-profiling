@@ -125,7 +125,7 @@ public class MainActivity extends AppCompatActivity {
     private static final long TIMER_PERIOD = 1000;
 
     private ThumbsUpDetection thumbsUpDetector;
-    private boolean readyForServer = true;
+    private boolean readyForServer = false;
     private long currentStepStartTime = 0;
 
     private long syncStartTime;
@@ -373,18 +373,17 @@ public class MainActivity extends AppCompatActivity {
                 consumer, BuildConfig.GABRIEL_HOST, PORT, getApplication(), onDisconnect);
 
         TextToSpeech.OnInitListener onInitListener = status -> {
-            if (status != TextToSpeech.ERROR) {
-                ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep(step).build();
-                InputFrame inputFrame = InputFrame.newBuilder()
-                        .setExtras(pack(toServerExtras))
-                        .build();
-
-                // We need to wait for textToSpeech to be initialized before asking for the first
-                // instruction.
-                serverComm.send(inputFrame, SOURCE, /* wait */ true);
-            } else {
+            if (status == TextToSpeech.ERROR) {
                 Log.e(TAG, "TextToSpeech initialization failed with status " + status);
             }
+            ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep(step).build();
+            InputFrame inputFrame = InputFrame.newBuilder()
+                    .setExtras(pack(toServerExtras))
+                    .build();
+
+            // We need to wait for textToSpeech to be initialized before asking for the first
+            // instruction.
+            serverComm.send(inputFrame, SOURCE, /* wait */ true);
         };
         this.textToSpeech = new TextToSpeech(getApplicationContext(), onInitListener);
 
@@ -407,7 +406,7 @@ public class MainActivity extends AppCompatActivity {
                 });
         thumbsUpDetector.hands.setErrorListener((message, e) -> Log.e(TAG, "MediaPipe Hands error:" + message));
     }
-    
+
     class LogTimerTask extends TimerTask {
         @Override
         public void run() {
