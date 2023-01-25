@@ -129,7 +129,7 @@ public class MainActivity extends AppCompatActivity {
     private long currentStepStartTime = 0;
 
     private long syncStartTime;
-    private long realStartTime;
+    private long realStartTime = 0;
     private int curFrameIndex = 0;
     private final File recordFolder = new File("/sdcard/traces/2023-01-23-14-45-40-EST");
     private final String recordFile = "DEMO-2023-01-23-14-45-40-EST.txt";
@@ -179,7 +179,6 @@ public class MainActivity extends AppCompatActivity {
             if (step.equals(WCA_FSM_START)) {
                 realStartTime = SystemClock.uptimeMillis();
                 logList.add(TAG + ": Start: " + realStartTime + "\n");
-                inputFrameCount = 1;
                 Log.i(TAG, "Profiling started.");
             }
             step = toClientExtras.getStep();
@@ -450,8 +449,11 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            inputFrameCount++;
             // Get most concurrent frame from the recorded trace
+            if (realStartTime == 0) {
+                return;
+            }
+            inputFrameCount++;
             while (curFrameIndex + 1 < frameTimeArr.size()) {
                 if (syncStartTime + SystemClock.uptimeMillis() - realStartTime > frameTimeArr.get(curFrameIndex + 1)) {
                     curFrameIndex++;

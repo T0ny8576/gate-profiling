@@ -121,7 +121,7 @@ def compare_power(profiles, output_file):
 
 if __name__ == "__main__":
     prof_1 = draw("vuzix_playback_glass_thumbsup.txt", "vuzix_playback_glass_thumbsup.jpg",
-                  "Vuzix - Cloudlet Thumbs-up Detection")
+                  "Vuzix - On-device Thumbs-up Detection")
     prof_list = [prof_1, ]
     print()
     compare_power(prof_list, "power_comparison.jpg")
