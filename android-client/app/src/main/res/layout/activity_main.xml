@@ -24,7 +24,7 @@
         android:layout_height="17dp"
         android:layout_marginStart="16dp"
         android:text="@string/thumb"
-        app:layout_constraintBottom_toTopOf="@+id/button4"
+        app:layout_constraintBottom_toTopOf="@+id/voiceButton"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/instructionImage"
         app:layout_constraintVertical_bias="0.87" />
@@ -59,7 +59,7 @@
         android:layout_width="27dp"
         android:layout_height="28dp"
         android:layout_marginStart="12dp"
-        app:layout_constraintBottom_toTopOf="@+id/button4"
+        app:layout_constraintBottom_toTopOf="@+id/voiceButton"
         app:layout_constraintStart_toEndOf="@+id/readyTextView"
         app:layout_constraintTop_toBottomOf="@+id/instructionImage"
         app:layout_constraintVertical_bias="1.0" />
@@ -75,7 +75,7 @@
         app:layout_constraintVertical_bias="0.15" />
 
     <Button
-        android:id="@+id/button4"
+        android:id="@+id/voiceButton"
         android:layout_width="32dp"
         android:layout_height="22dp"
         android:layout_marginStart="16dp"

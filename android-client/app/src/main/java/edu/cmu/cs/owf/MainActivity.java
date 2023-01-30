@@ -5,7 +5,6 @@ import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
@@ -23,10 +22,10 @@ import android.media.MediaPlayer;
 import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.SystemClock;
-import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.view.View;
+import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.VideoView;
@@ -42,7 +41,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.List;
 import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -77,28 +75,24 @@ public class MainActivity extends AppCompatActivity {
     public static final String EXTRA_APP_SECRET = "edu.cmu.cs.owf.APP_SECRET";
     public static final String EXTRA_MEETING_NUMBER = "edu.cmu.cs.owf.MEETING_NUMBER";
     public static final String EXTRA_MEETING_PASSWORD = "edu.cmu.cs.owf.MEETING_PASSWORD";
-
-    private static final int REQUEST_CODE = 999;
-    private static final String CALL_EXPERT = "CALL EXPERT";
-    private static final String REPORT = "REPORT";
-    private static final String USER_READY = "READY";
     private static final String WCA_FSM_START = "WCA_FSM_START";
     private static final String WCA_FSM_END = "WCA_FSM_END";
-    private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
+    ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
 
     private String step = WCA_FSM_START;
-    private boolean readyForServer = true;
+    boolean readyForServer = true;
 
     private ServerComm serverComm;
     private YuvToJPEGConverter yuvToJPEGConverter;
     private CameraCapture cameraCapture;
 
-    private TextToSpeech textToSpeech;
+    TextToSpeech textToSpeech;
+    private VoiceCmdReceiver mVoiceCmdReceiver;
     private ImageViewUpdater instructionViewUpdater;
     private ImageView instructionImage;
-    private ImageView readyView;
-    private TextView readyTextView;
+    ImageView readyView;
+    TextView readyTextView;
     private VideoView instructionVideo;
     private File videoFile;
 
@@ -326,6 +320,12 @@ public class MainActivity extends AppCompatActivity {
 
         yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
+
+        // Create the voice command receiver class
+        mVoiceCmdReceiver = new VoiceCmdReceiver(this);
+
+        Button voiceButton = findViewById(R.id.voiceButton);
+        voiceButton.requestFocusFromTouch();
     }
 
     class LogTimerTask extends TimerTask {
@@ -395,48 +395,13 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        mVoiceCmdReceiver.unregister();
         cameraCapture.shutdown();
         // TODO: Clean up the Zoom session?
+        super.onDestroy();
     }
 
     public void startVoiceRecognition(View view) {
-        final Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        startActivityForResult(intent, REQUEST_CODE);
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-
-        if (resultCode == RESULT_OK) {
-            final List<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-            Log.d(TAG, "ASR results: " + results.toString());
-            if (results.size() > 0 && !results.get(0).isEmpty()) {
-                String spokenText = results.get(0).toUpperCase();
-                // TODO: Use more keywords for starting Zoom or sending error report
-                if (spokenText.contains(USER_READY)) {
-                    readyForServer = true;
-                    runOnUiThread(() -> {
-                        readyView.setVisibility(View.VISIBLE);
-                        readyTextView.setVisibility(View.VISIBLE);
-                    });
-                } else if (spokenText.contains(CALL_EXPERT)) {
-                    this.textToSpeech.speak("Calling expert now.",
-                            TextToSpeech.QUEUE_FLUSH, null, null);
-                    this.reqCommand = ToServerExtras.ClientCmd.ZOOM_START;
-                } else if (spokenText.contains(REPORT)) {
-                    this.reqCommand = ToServerExtras.ClientCmd.REPORT;
-                    // TODO: Send error report
-                    //  Let the server return this feedback message audio
-                    final String feedback = "An error log has been recorded. We appreciate your feedback.";
-                    this.textToSpeech.speak(feedback, TextToSpeech.QUEUE_FLUSH, null, null);
-                }
-            }
-        } else {
-            Log.d(TAG, "ASR Result not OK");
-        }
+        mVoiceCmdReceiver.TriggerRecognizerToListen(true);
     }
 }
