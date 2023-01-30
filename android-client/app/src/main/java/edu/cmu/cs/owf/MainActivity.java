@@ -13,12 +13,15 @@ import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.view.PreviewView;
+import androidx.core.content.ContextCompat;
 
+import android.Manifest;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
@@ -124,7 +127,7 @@ public class MainActivity extends AppCompatActivity {
     private long syncStartTime;
     private long realStartTime = 0;
     private int curFrameIndex = 0;
-    private final File recordFolder = new File("/sdcard/traces/2023-01-23-14-45-40-EST");
+    private final File recordFolder = new File("/sdcard/Android/data/edu.cmu.cs.owf_prof_thumbsup_glass_rec/files/2023-01-23-14-45-40-EST");
     private final String recordFile = "DEMO-2023-01-23-14-45-40-EST.txt";
     private ArrayList<Long> frameTimeArr = new ArrayList<>();
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
@@ -264,26 +267,26 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
-                startActivity(intent);
-            }
-        }
-
-//        // Permissions for ODG, Magicleap, and Google Glass
-//        String[] permissions = new String[] {
-//                Manifest.permission.INTERNET, Manifest.permission.READ_EXTERNAL_STORAGE,
-//                Manifest.permission.WRITE_EXTERNAL_STORAGE};
-//        for (String permission : permissions) {
-//            if (ContextCompat.checkSelfPermission(this, permission) !=
-//                    PackageManager.PERMISSION_GRANTED) {
-//                requestPermissions(permissions, 0);
-//                break;
+//        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
+//        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+//            if (!Environment.isExternalStorageManager()) {
+//                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+//                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
+//                startActivity(intent);
 //            }
 //        }
+
+        // Permissions for ODG, Magicleap, and Google Glass
+        String[] permissions = new String[] {
+                Manifest.permission.INTERNET, Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE};
+        for (String permission : permissions) {
+            if (ContextCompat.checkSelfPermission(this, permission) !=
+                    PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(permissions, 0);
+                break;
+            }
+        }
 
         videoFile = new File(this.getCacheDir(), VIDEO_NAME);
         PreviewView viewFinder = findViewById(R.id.viewFinder);

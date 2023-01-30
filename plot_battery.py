@@ -124,6 +124,10 @@ if __name__ == "__main__":
                   "Vuzix - On-device Thumbs-up Detection")
     prof_2 = draw("vuzix_playback_cloudlet_thumbsup.txt", "vuzix_playback_cloudlet_thumbsup.jpg",
                   "Vuzix - Cloudlet Thumbs-up Detection")
-    prof_list = [prof_1, prof_2]
+    prof_3 = draw("gg_playback_glass_thumbsup.txt", "gg_playback_glass_thumbsup.jpg",
+                  "Google Glass - On-device Thumbs-up Detection")
+    prof_4 = draw("gg_playback_cloudlet_thumbsup.txt", "gg_playback_cloudlet_thumbsup.jpg",
+                  "Google Glass - Cloudlet Thumbs-up Detection")
+    prof_list = [prof_1, prof_2, prof_3, prof_4]
     print()
     compare_power(prof_list, "power_comparison.jpg")
