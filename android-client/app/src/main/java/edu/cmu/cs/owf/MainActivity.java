@@ -43,8 +43,6 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
 
@@ -104,12 +102,10 @@ public class MainActivity extends AppCompatActivity {
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
     private FileWriter logFileWriter;
-    private Timer timer;
     private int inputFrameCount = 0;
-    private static final long TIMER_PERIOD = 1000;
 
     private ThumbsUpDetection thumbsUpDetector;
-    private boolean readyForServer = true;
+    private boolean readyForServer = false;
     private long currentStepStartTime = 0;
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
@@ -307,9 +303,6 @@ public class MainActivity extends AppCompatActivity {
         yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
 
-//        timer = new Timer();
-//        timer.scheduleAtFixedRate(new LogTimerTask(), 0, TIMER_PERIOD);
-
         thumbsUpDetector = new ThumbsUpDetection(this);
         thumbsUpDetector.hands.setResultListener(
                 handsResult -> {
@@ -326,16 +319,8 @@ public class MainActivity extends AppCompatActivity {
                 });
         thumbsUpDetector.hands.setErrorListener((message, e) -> Log.e(TAG, "MediaPipe Hands error:" + message));
     }
-    
-//    class LogTimerTask extends TimerTask {
-//        @Override
-//        public void run() {
-//        }
-//    }
 
     private void writeLog() {
-        timer.cancel();
-        timer.purge();
         try {
             for (String logString: logList) {
                 logFileWriter.write(logString);
@@ -358,7 +343,6 @@ public class MainActivity extends AppCompatActivity {
     final private ImageAnalysis.Analyzer analyzer = new ImageAnalysis.Analyzer() {
         @Override
         public void analyze(@NonNull ImageProxy image) {
-            Log.w(TAG, "analyzer: " + SystemClock.uptimeMillis());
             boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
             if (step.equals(WCA_FSM_END) && !toWait) {
                 image.close();

@@ -37,7 +37,7 @@ INPUT_QUEUE_MAXSIZE = 60
 PORT = 9099
 NUM_TOKENS = 1
 DETECTOR_ONES_SIZE = (1, 480, 640, 3)
-CLASSIFIER_THRESHOLD = 0.9
+CLASSIFIER_THRESHOLD = 0.5
 
 MAX_FRAMES_CACHED = 1000
 CACHE_BASEDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache')
@@ -268,7 +268,7 @@ class InferenceEngine(cognitive_engine.Engine):
         status = gabriel_pb2.ResultWrapper.Status.SUCCESS
         result_wrapper = cognitive_engine.create_result_wrapper(status)
 
-        # logger.info('sending %s', transition.instruction.audio)
+        logger.info('sending %s', transition.instruction.audio)
 
         result = gabriel_pb2.ResultWrapper.Result()
         result.payload_type = gabriel_pb2.PayloadType.TEXT
@@ -466,8 +466,8 @@ class InferenceEngine(cognitive_engine.Engine):
         if not good_boxes:
             return self._result_wrapper_for(step)
 
-        # print()
-        # print('Detector boxes:', box_scores)
+        print()
+        print('Detector boxes:', box_scores)
         for best_box in good_boxes:
             ymin, xmin, ymax, xmax = best_box
             (left, right, top, bottom) = (xmin * im_width, xmax * im_width,
