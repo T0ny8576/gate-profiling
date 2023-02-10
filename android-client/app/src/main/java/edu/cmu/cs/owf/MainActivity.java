@@ -476,8 +476,10 @@ public class MainActivity extends AppCompatActivity {
             while (curFrameIndex + 1 < frameTimeArr.size()) {
                 // Never skip or consume locally a frame that should be sent to the server
                 // Note that the last frame in the recorded trace will never be skipped and might be reused
-                if (!readyToSend && frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
-                    curFrameIndex = Integer.max(curFrameIndex - 1, lastFrameIndex);
+                if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
+                    if (!readyToSend) {
+                        curFrameIndex = Integer.max(curFrameIndex - 1, lastFrameIndex);
+                    }
                     break;
                 }
 
