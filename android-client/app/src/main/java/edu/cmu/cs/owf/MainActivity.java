@@ -70,6 +70,7 @@ import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
 import edu.cmu.cs.gabriel.camera.YuvToJPEGConverter;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
+import edu.cmu.cs.gabriel.client.results.SendSupplierResult;
 import edu.cmu.cs.gabriel.protocol.Protos.InputFrame;
 import edu.cmu.cs.gabriel.protocol.Protos.ResultWrapper;
 import edu.cmu.cs.gabriel.protocol.Protos.PayloadType;
@@ -134,9 +135,13 @@ public class MainActivity extends AppCompatActivity {
     private long syncStartTime;
     private long realStartTime = 0;
     private int curFrameIndex = 0;
-    private final File recordFolder = new File("/sdcard/Android/data/edu.cmu.cs.owf_prof_thumbsup_glass_rec/files/2023-01-23-14-45-40-EST");
-    private final String recordFile = "DEMO-2023-01-23-14-45-40-EST.txt";
+    private int lastFrameIndex = -1;
+    private int numFramesSkipped = 0;
+    private int numFramesDelayed = 0;
+    private final File recordFolder = new File("/sdcard/traces/2023-02-10-18-21-18-GMT");
+    private final String recordFile = "THUMBSUP-2023-02-10-18-21-18-GMT.txt";
     private ArrayList<Long> frameTimeArr = new ArrayList<>();
+    private ArrayList<Integer> frameSendResultArr = new ArrayList<>();
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -188,6 +193,8 @@ public class MainActivity extends AppCompatActivity {
             if (step.equals(WCA_FSM_END)) {
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
+                logList.add(TAG + ": Number of frames skipped: " + numFramesSkipped + "\n");
+                logList.add(TAG + ": Number of frames delayed: " + numFramesDelayed + "\n");
                 writeLog();
                 readyForServer = false;
                 runOnUiThread(() -> {
@@ -341,6 +348,7 @@ public class MainActivity extends AppCompatActivity {
                 String[] frameRec = sc.nextLine().split(",");
                 if (frameRec.length == 4) {
                     frameTimeArr.add(Long.parseLong(frameRec[0]));
+                    frameSendResultArr.add(Integer.parseInt(frameRec[3]));
                 }
             }
         } catch (FileNotFoundException e) {
@@ -452,40 +460,76 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // Get most concurrent frame from the recorded trace
             if (realStartTime == 0) {
                 return;
             }
+
+            // Get most concurrent frame from the recorded trace
             inputFrameCount++;
+            boolean readyToSend = readyForServer;
+            long timeDiff;
+            // Try not to reuse any frame if it runs faster than the recorded trace
+            // Always try to wait and use the next frame if possible
+            if (lastFrameIndex + 1 < frameTimeArr.size()) {
+                curFrameIndex = lastFrameIndex + 1;
+            }
             while (curFrameIndex + 1 < frameTimeArr.size()) {
-                if (syncStartTime + SystemClock.uptimeMillis() - realStartTime > frameTimeArr.get(curFrameIndex + 1)) {
+                // Never skip or consume locally a frame that should be sent to the server
+                // Note that the last frame in the recorded trace will never be skipped and might be reused
+                if (!readyToSend && frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
+                    curFrameIndex = Integer.max(curFrameIndex - 1, lastFrameIndex);
+                    break;
+                }
+
+                timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex + 1);
+                // If it runs slower than the recorded trace, skip frames when necessary
+                if (timeDiff > 0) {
                     curFrameIndex++;
                 } else {
                     break;
                 }
             }
+            numFramesSkipped += Integer.max(curFrameIndex - lastFrameIndex - 1, 0);
+            lastFrameIndex = curFrameIndex;
+
+            // If it runs faster, pause until the timestamp of the chosen frame matches that from the recorded trace
+            timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex);
+            if (timeDiff < 0) {
+                numFramesDelayed++;
+                try {
+                    Thread.sleep(-timeDiff);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+
             File jpegFrame = new File(recordFolder, "THUMBSUP-" + frameTimeArr.get(curFrameIndex) + ".jpg");
             try {
                 byte[] jpegBytes = Files.readAllBytes(jpegFrame.toPath());
 
-                if (readyForServer) {
-                    ToServerExtras.ClientCmd clientCmd = prepCommand;
-                    prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-                    serverComm.sendSupplier(() -> {
-                        ByteString jpegByteString = ByteString.copyFrom(jpegBytes);
+                if (readyToSend) {
+                    // For determinism, ensure that the same frames are sent to the server
+                    if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
+                        ToServerExtras.ClientCmd clientCmd = prepCommand;
+                        prepCommand = ToServerExtras.ClientCmd.NO_CMD;
+                        serverComm.sendSupplier(() -> {
+                            ByteString jpegByteString = ByteString.copyFrom(jpegBytes);
 
-                        ToServerExtras toServerExtras = ToServerExtras.newBuilder()
-                                .setStep(MainActivity.this.step)
-                                .setClientCmd(clientCmd)
-                                .build();
+                            ToServerExtras toServerExtras = ToServerExtras.newBuilder()
+                                    .setStep(MainActivity.this.step)
+                                    .setClientCmd(clientCmd)
+                                    .build();
 
-                        return InputFrame.newBuilder()
-                                .setPayloadType(PayloadType.IMAGE)
-                                .addPayloads(jpegByteString)
-                                .setExtras(pack(toServerExtras))
-                                .build();
-                    }, SOURCE, /* wait */ toWait);
+                            return InputFrame.newBuilder()
+                                    .setPayloadType(PayloadType.IMAGE)
+                                    .addPayloads(jpegByteString)
+                                    .setExtras(pack(toServerExtras))
+                                    .build();
+                        }, SOURCE, true);
+                    }
                 } else {
+                    // A few frames that should be consumed here might be dropped due to the
+                    // server's delayed response, but this level of inconsistency is tolerable
                     Bitmap bitmapImage = BitmapFactory.decodeStream(
                             new ByteArrayInputStream(jpegBytes));
                     thumbsUpDetector.hands.send(bitmapImage, SystemClock.uptimeMillis());
