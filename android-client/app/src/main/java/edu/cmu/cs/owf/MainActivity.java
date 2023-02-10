@@ -51,6 +51,7 @@ import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
 import edu.cmu.cs.gabriel.camera.YuvToJPEGConverter;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
+import edu.cmu.cs.gabriel.client.results.SendSupplierResult;
 import edu.cmu.cs.gabriel.protocol.Protos.InputFrame;
 import edu.cmu.cs.gabriel.protocol.Protos.ResultWrapper;
 import edu.cmu.cs.gabriel.protocol.Protos.PayloadType;
@@ -98,7 +99,9 @@ public class MainActivity extends AppCompatActivity {
     private File videoFile;
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
-    private final String LOGFILE = "THUMBSUP-" + sdf.format(new Date()) + ".txt";
+    private final String dateString = sdf.format(new Date());
+    private final String LOGFILE = "THUMBSUP-" + dateString + ".csv";
+    private File logFolder;
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
     private FileWriter logFileWriter;
@@ -192,7 +195,7 @@ public class MainActivity extends AppCompatActivity {
         // Load the user guidance (audio, image/video) from the result wrapper
         for (ResultWrapper.Result result : resultWrapper.getResultsList()) {
             if (result.getPayloadType() == PayloadType.TEXT) {
-                if (readyForServer) {
+                if (!step.equals(WCA_FSM_END)) {
                     readyForServer = false;
                     currentStepStartTime = SystemClock.uptimeMillis();
                     runOnUiThread(() -> {
@@ -271,9 +274,13 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        File logFile = new File(getExternalFilesDir(null), LOGFILE);
+        logFolder = new File(getExternalFilesDir(null), dateString);
+        if (!logFolder.exists()) {
+            logFolder.mkdir();
+        }
+        File logFile = new File(logFolder, LOGFILE);
         logFile.delete();
-        logFile = new File(getExternalFilesDir(null), LOGFILE);
+        logFile = new File(logFolder, LOGFILE);
         try {
             logFileWriter = new FileWriter(logFile, true);
         } catch (IOException e) {
@@ -354,7 +361,7 @@ public class MainActivity extends AppCompatActivity {
             byte[] jpegBytes = jpegByteString.toByteArray();
             long jpegTime = SystemClock.uptimeMillis();
             try {
-                File jpegFile = new File(getExternalFilesDir(null),
+                File jpegFile = new File(logFolder,
                         "THUMBSUP-" + jpegTime + ".jpg");
                 if (jpegFile.exists()) {
                     jpegFile.delete();
@@ -362,6 +369,7 @@ public class MainActivity extends AppCompatActivity {
                 FileOutputStream fos = new FileOutputStream(jpegFile.getPath());
                 fos.write(jpegBytes);
                 fos.close();
+
             } catch (IOException e) {
                 Log.w(TAG, "Saving image failed: " + jpegTime);
             }
@@ -369,7 +377,7 @@ public class MainActivity extends AppCompatActivity {
             if (readyForServer) {
                 ToServerExtras.ClientCmd clientCmd = prepCommand;
                 prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-                serverComm.sendSupplier(() -> {
+                SendSupplierResult sendResult = serverComm.sendSupplier(() -> {
                     ToServerExtras toServerExtras = ToServerExtras.newBuilder()
                             .setStep(MainActivity.this.step)
                             .setClientCmd(clientCmd)
@@ -381,7 +389,9 @@ public class MainActivity extends AppCompatActivity {
                             .setExtras(pack(toServerExtras))
                             .build();
                 }, SOURCE, /* wait */ toWait);
+                logList.add(jpegTime + ",THUMBSUP-" + jpegTime + ".jpg," + step + "," + sendResult.ordinal() + "\n");
             } else {
+                logList.add(jpegTime + ",THUMBSUP-" + jpegTime + ".jpg," + step + ",-1\n");
                 Bitmap bitmapImage = BitmapFactory.decodeStream(
                         new ByteArrayInputStream(jpegBytes));
                 thumbsUpDetector.hands.send(bitmapImage, SystemClock.uptimeMillis());
