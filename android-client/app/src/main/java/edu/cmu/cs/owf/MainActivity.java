@@ -5,7 +5,6 @@ import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
@@ -21,7 +20,6 @@ import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
 import android.os.Bundle;
 import android.os.SystemClock;
-import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.view.View;
@@ -41,7 +39,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
@@ -100,7 +97,7 @@ public class MainActivity extends AppCompatActivity {
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
     private final String dateString = sdf.format(new Date());
-    private final String LOGFILE = "THUMBSUP-" + dateString + ".csv";
+    private final String LOGFILE = "THUMBSUP-" + dateString + ".txt";
     private File logFolder;
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
@@ -407,39 +404,5 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
         cameraCapture.shutdown();
         // TODO: Clean up the Zoom session?
-    }
-
-    public void startVoiceRecognition(View view) {
-        final Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        startActivityForResult(intent, REQUEST_CODE);
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-
-        if (resultCode == RESULT_OK) {
-            final List<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-            Log.d(TAG, "ASR results: " + results.toString());
-            if (results.size() > 0 && !results.get(0).isEmpty()) {
-                String spokenText = results.get(0);
-                // TODO: Use more keywords for starting Zoom or sending error report
-                if (spokenText.toUpperCase().contains(CALL_EXPERT)) {
-                    this.textToSpeech.speak("Calling expert now.",
-                            TextToSpeech.QUEUE_FLUSH, null, null);
-                    this.reqCommand = ToServerExtras.ClientCmd.ZOOM_START;
-                } else if (spokenText.toUpperCase().contains(REPORT)) {
-                    this.reqCommand = ToServerExtras.ClientCmd.REPORT;
-                    // TODO: Send error report
-                    //  Let the server return this feedback message audio
-                    final String feedback = "An error log has been recorded. We appreciate your feedback.";
-                    this.textToSpeech.speak(feedback, TextToSpeech.QUEUE_FLUSH, null, null);
-                }
-            }
-        } else {
-            Log.d(TAG, "ASR Result not OK");
-        }
     }
 }
