@@ -229,7 +229,7 @@ public class MainActivity extends AppCompatActivity {
         // Load the user guidance (audio, image/video) from the result wrapper
         for (ResultWrapper.Result result : resultWrapper.getResultsList()) {
             if (result.getPayloadType() == PayloadType.TEXT) {
-                if (readyForServer) {
+                if (!step.equals(WCA_FSM_END)) {
                     readyForServer = false;
                     currentStepStartTime = SystemClock.uptimeMillis();
                     runOnUiThread(() -> {
