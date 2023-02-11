@@ -120,8 +120,10 @@ def compare_power(profiles, output_file):
 
 
 if __name__ == "__main__":
-    prof_1 = draw("vuzix_playback_glass_thumbsup.txt", "vuzix_playback_glass_thumbsup.jpg",
-                  "Vuzix - On-device Thumbs-up Detection")
-    prof_list = [prof_1, ]
+    prof_1 = draw("gg_playback_glass_thumbsup_wait.txt", "gg_playback_glass_thumbsup_wait.jpg",
+                  "Google Glass - On-device Thumbs-up")
+    prof_2 = draw("gg_playback_glass_thumbsup_nowait.txt", "gg_playback_glass_thumbsup_nowait.jpg",
+                  "Google Glass - On-device Thumbs-up Max Throughput")
+    prof_list = [prof_1, prof_2, ]
     print()
     compare_power(prof_list, "power_comparison.jpg")

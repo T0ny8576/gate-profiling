@@ -137,7 +137,8 @@ public class MainActivity extends AppCompatActivity {
     private int curFrameIndex = 0;
     private int lastFrameIndex = -1;
     private int numFramesSkipped = 0;
-    private int numFramesDelayed = 0;
+    private int numFramesReused = 0;
+    private byte[] dummyJpeg;
     private final File recordFolder = new File("/sdcard/traces/2023-02-10-18-21-18-GMT");
     private final String recordFile = "THUMBSUP-2023-02-10-18-21-18-GMT.txt";
     private ArrayList<Long> frameTimeArr = new ArrayList<>();
@@ -194,7 +195,7 @@ public class MainActivity extends AppCompatActivity {
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
                 logList.add(TAG + ": Number of frames skipped: " + numFramesSkipped + "\n");
-                logList.add(TAG + ": Number of frames delayed: " + numFramesDelayed + "\n");
+                logList.add(TAG + ": Number of frames reused: " + numFramesReused + "\n");
                 writeLog();
                 readyForServer = false;
                 runOnUiThread(() -> {
@@ -355,6 +356,14 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
 
+        // Save the first recorded frame as a dummy frame
+        File jpegFrame = new File(recordFolder, "THUMBSUP-" + frameTimeArr.get(0) + ".jpg");
+        try {
+            dummyJpeg = Files.readAllBytes(jpegFrame.toPath());
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
         IntentFilter intentFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
         batteryReceiver = new BroadcastReceiver() {
             @Override
@@ -468,9 +477,8 @@ public class MainActivity extends AppCompatActivity {
             inputFrameCount++;
             boolean readyToSend = readyForServer;
             long timeDiff;
-            // Try not to reuse any frame if it runs faster than the recorded trace
-            // Always try to wait and use the next frame if possible
-            if (lastFrameIndex + 1 < frameTimeArr.size()) {
+            // Try to proceed by one frame each time when readyToSend
+            if (readyToSend && lastFrameIndex + 1 < frameTimeArr.size()) {
                 curFrameIndex = lastFrameIndex + 1;
             }
             while (curFrameIndex + 1 < frameTimeArr.size()) {
@@ -491,19 +499,12 @@ public class MainActivity extends AppCompatActivity {
                     break;
                 }
             }
-            numFramesSkipped += Integer.max(curFrameIndex - lastFrameIndex - 1, 0);
-            lastFrameIndex = curFrameIndex;
-
-            // If it runs faster, pause until the timestamp of the chosen frame matches that from the recorded trace
-            timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex);
-            if (timeDiff < 0) {
-                numFramesDelayed++;
-                try {
-                    Thread.sleep(-timeDiff);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
+            if (curFrameIndex == lastFrameIndex) {
+                numFramesReused++;
+            } else {
+                numFramesSkipped += curFrameIndex - lastFrameIndex - 1;
             }
+            lastFrameIndex = curFrameIndex;
 
             File jpegFrame = new File(recordFolder, "THUMBSUP-" + frameTimeArr.get(curFrameIndex) + ".jpg");
             try {
@@ -528,6 +529,24 @@ public class MainActivity extends AppCompatActivity {
                                     .setExtras(pack(toServerExtras))
                                     .build();
                         }, SOURCE, true);
+                    } else {
+                        // Try to send dummy frames to maintain the maximum throughput
+                        ToServerExtras.ClientCmd clientCmd = prepCommand;
+                        prepCommand = ToServerExtras.ClientCmd.NO_CMD;
+                        serverComm.sendSupplier(() -> {
+                            ByteString jpegByteString = ByteString.copyFrom(dummyJpeg);
+
+                            ToServerExtras toServerExtras = ToServerExtras.newBuilder()
+                                    .setStep(MainActivity.this.step)
+                                    .setClientCmd(clientCmd)
+                                    .build();
+
+                            return InputFrame.newBuilder()
+                                    .setPayloadType(PayloadType.IMAGE)
+                                    .addPayloads(jpegByteString)
+                                    .setExtras(pack(toServerExtras))
+                                    .build();
+                        }, SOURCE, false);
                     }
                 } else {
                     // A few frames that should be consumed here might be dropped due to the
@@ -536,7 +555,6 @@ public class MainActivity extends AppCompatActivity {
                             new ByteArrayInputStream(jpegBytes));
                     thumbsUpDetector.hands.send(bitmapImage, SystemClock.uptimeMillis());
                 }
-
             } catch (IOException e) {
                 e.printStackTrace();
             }
