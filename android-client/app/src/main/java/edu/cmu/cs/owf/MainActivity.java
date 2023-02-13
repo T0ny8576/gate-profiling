@@ -25,7 +25,6 @@ import android.os.SystemClock;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.view.View;
-import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.VideoView;
@@ -59,7 +58,13 @@ import edu.cmu.cs.owf.Protos.ToClientExtras;
 import edu.cmu.cs.owf.Protos.ToServerExtras;
 import edu.cmu.cs.owf.Protos.ZoomInfo;
 
-public class MainActivity extends AppCompatActivity {
+import edu.cmu.pocketsphinx.Assets;
+import edu.cmu.pocketsphinx.Hypothesis;
+import edu.cmu.pocketsphinx.RecognitionListener;
+import edu.cmu.pocketsphinx.SpeechRecognizer;
+import edu.cmu.pocketsphinx.SpeechRecognizerSetup;
+
+public class MainActivity extends AppCompatActivity implements RecognitionListener {
     private static final String TAG = "MainActivity";
     private static final String VIDEO_NAME = "video";
     private static final String SOURCE = "owf_client";
@@ -81,14 +86,13 @@ public class MainActivity extends AppCompatActivity {
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
 
     private String step = WCA_FSM_START;
-    boolean readyForServer = true;
+    boolean readyForServer = false;
 
     private ServerComm serverComm;
     private YuvToJPEGConverter yuvToJPEGConverter;
     private CameraCapture cameraCapture;
 
     TextToSpeech textToSpeech;
-    private VoiceCmdReceiver mVoiceCmdReceiver;
     private ImageViewUpdater instructionViewUpdater;
     private ImageView instructionImage;
     ImageView readyView;
@@ -106,6 +110,10 @@ public class MainActivity extends AppCompatActivity {
     private Timer timer;
     private int inputFrameCount = 0;
     private static final long TIMER_PERIOD = 1000;
+
+    private static final String KWS_SEARCH = "keyword";
+    private static final String KEYPHRASE = "ready for detection";
+    private SpeechRecognizer recognizer;
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -159,6 +167,7 @@ public class MainActivity extends AppCompatActivity {
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
                 writeLog();
                 readyForServer = false;
+                recognizer.stop();
                 runOnUiThread(() -> {
                     readyView.setVisibility(View.INVISIBLE);
                     readyTextView.setVisibility(View.INVISIBLE);
@@ -191,12 +200,13 @@ public class MainActivity extends AppCompatActivity {
         // Load the user guidance (audio, image/video) from the result wrapper
         for (ResultWrapper.Result result : resultWrapper.getResultsList()) {
             if (result.getPayloadType() == PayloadType.TEXT) {
-                if (readyForServer) {
+                if (!step.equals(WCA_FSM_END)) {
                     readyForServer = false;
                     runOnUiThread(() -> {
                         readyView.setVisibility(View.INVISIBLE);
                         readyTextView.setVisibility(View.VISIBLE);
                     });
+                    recognizer.startListening(KWS_SEARCH);
                 }
 
                 ByteString dataString = result.getPayload();
@@ -305,6 +315,22 @@ public class MainActivity extends AppCompatActivity {
         serverComm = ServerComm.createServerComm(
                 consumer, BuildConfig.GABRIEL_HOST, PORT, getApplication(), onDisconnect);
 
+        try {
+            Assets assets = new Assets(getApplicationContext());
+            File assetsDir = assets.syncAssets();
+
+            recognizer = SpeechRecognizerSetup.defaultSetup()
+                    .setAcousticModel(new File(assetsDir, "en-us-ptm"))
+                    .setDictionary(new File(assetsDir, "cmudict-en-us.dict"))
+                    .getRecognizer();
+            recognizer.addListener(this);
+
+            // Create keyword-activation search.
+            recognizer.addKeyphraseSearch(KWS_SEARCH, KEYPHRASE);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
         TextToSpeech.OnInitListener onInitListener = i -> {
 
             ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep(step).build();
@@ -320,12 +346,6 @@ public class MainActivity extends AppCompatActivity {
 
         yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
-
-        // Create the voice command receiver class
-        mVoiceCmdReceiver = new VoiceCmdReceiver(this);
-
-        Button voiceButton = findViewById(R.id.voiceButton);
-        voiceButton.requestFocusFromTouch();
     }
 
     class LogTimerTask extends TimerTask {
@@ -395,13 +415,57 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        mVoiceCmdReceiver.unregister();
+        if (recognizer != null) {
+            recognizer.cancel();
+            recognizer.shutdown();
+        }
         cameraCapture.shutdown();
         // TODO: Clean up the Zoom session?
         super.onDestroy();
     }
 
-    public void startVoiceRecognition(View view) {
-        mVoiceCmdReceiver.TriggerRecognizerToListen(true);
+    @Override
+    public void onBeginningOfSpeech() {
+    }
+
+    @Override
+    public void onEndOfSpeech() {
+        // Stop speech recognition and invoke OnResult callback
+        recognizer.stop();
+    }
+
+    @Override
+    public void onPartialResult(Hypothesis hypothesis) {
+    }
+
+    @Override
+    public void onResult(Hypothesis hypothesis) {
+        if (hypothesis == null) {
+            recognizer.startListening(KWS_SEARCH);
+            return;
+        }
+        String text = hypothesis.getHypstr();
+        Log.w(TAG, "On speech result: " + text);
+        recognizer.cancel();
+        if (text.contains(KEYPHRASE)) {
+            readyForServer = true;
+            runOnUiThread(() -> {
+                readyView.setVisibility(View.VISIBLE);
+                readyTextView.setVisibility(View.VISIBLE);
+            });
+        } else {
+            recognizer.startListening(KWS_SEARCH);
+        }
+    }
+
+    @Override
+    public void onError(Exception e) {
+        e.printStackTrace();
+    }
+
+    @Override
+    public void onTimeout() {
+        recognizer.stop();
+        recognizer.startListening(KWS_SEARCH);
     }
 }

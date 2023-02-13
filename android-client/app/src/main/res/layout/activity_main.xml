@@ -21,10 +21,9 @@
         android:id="@+id/readyTextView"
         android:layout_width="130dp"
         android:layout_height="20dp"
-        android:layout_marginStart="10dp"
-        android:layout_marginBottom="10dp"
+        android:layout_marginStart="8dp"
         android:text="@string/thumb"
-        app:layout_constraintBottom_toTopOf="@+id/voiceButton"
+        app:layout_constraintBottom_toTopOf="@+id/readyView"
         app:layout_constraintStart_toStartOf="parent" />
 
     <ImageView
@@ -42,10 +41,10 @@
         android:id="@+id/readyView"
         android:layout_width="60dp"
         android:layout_height="60dp"
-        android:layout_marginStart="45dp"
-        android:layout_marginBottom="20dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginBottom="16dp"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toEndOf="@+id/voiceButton" />
+        app:layout_constraintStart_toStartOf="parent" />
 
     <androidx.camera.view.PreviewView
         android:id="@+id/viewFinder"
@@ -56,16 +55,5 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintVertical_bias="0.16" />
-
-    <Button
-        android:id="@+id/voiceButton"
-        android:layout_width="70dp"
-        android:layout_height="31dp"
-        android:layout_marginStart="16dp"
-        android:layout_marginBottom="16dp"
-        android:onClick="startVoiceRecognition"
-        android:text="@string/start_asr"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
