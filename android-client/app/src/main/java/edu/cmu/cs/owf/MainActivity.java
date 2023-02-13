@@ -465,10 +465,8 @@ public class MainActivity extends AppCompatActivity {
             }
 
             // Get most concurrent frame from the recorded trace
-            inputFrameCount++;
             boolean readyToSend = readyForServer;
             long timeDiff;
-            // Try not to reuse any frame if it runs faster than the recorded trace
             // Always try to wait and use the next frame if possible
             if (lastFrameIndex + 1 < frameTimeArr.size()) {
                 curFrameIndex = lastFrameIndex + 1;
@@ -491,6 +489,27 @@ public class MainActivity extends AppCompatActivity {
                     break;
                 }
             }
+
+            // Do not reuse frames even if it runs faster than the recorded trace
+            if (curFrameIndex == lastFrameIndex) {
+                if (curFrameIndex + 1 == frameTimeArr.size()) {
+                    return;
+                }
+                // Pause for the next frame
+                timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex + 1);
+                if (timeDiff < 0) {
+                    try {
+                        Thread.sleep(-timeDiff);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+                return;
+            }
+
+            inputFrameCount++;
+//            Log.w(TAG, "inputCount / Cur / Last / Ready = " + inputFrameCount +
+//                    " / " + curFrameIndex + " / " + lastFrameIndex + " / " + readyForServer);
             numFramesSkipped += Integer.max(curFrameIndex - lastFrameIndex - 1, 0);
             lastFrameIndex = curFrameIndex;
 
