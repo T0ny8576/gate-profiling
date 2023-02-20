@@ -6,13 +6,7 @@ import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.camera.core.CameraSelector;
-import androidx.camera.core.ImageAnalysis;
-import androidx.camera.core.ImageProxy;
-import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
 
 import android.Manifest;
@@ -33,7 +27,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.SystemClock;
-import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.view.View;
@@ -47,7 +40,6 @@ import com.google.protobuf.InvalidProtocolBufferException;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
@@ -57,17 +49,16 @@ import java.nio.file.Files;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.List;
 import java.util.Locale;
 import java.util.Scanner;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
-import edu.cmu.cs.gabriel.camera.CameraCapture;
 import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
-import edu.cmu.cs.gabriel.camera.YuvToJPEGConverter;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
 import edu.cmu.cs.gabriel.client.results.SendSupplierResult;
@@ -83,32 +74,16 @@ public class MainActivity extends AppCompatActivity {
     private static final String VIDEO_NAME = "video";
     private static final String SOURCE = "owf_client";
     private static final int PORT = 9099;
-
-    // Attempt to get the largest images possible. ImageAnalysis is limited to something below 1080p
-    // according to this:
-    // https://developer.android.com/reference/androidx/camera/core/ImageAnalysis.Builder#setTargetResolution(android.util.Size)
-    private static final int WIDTH = 1920;
-    private static final int HEIGHT = 1080;
-
     public static final String EXTRA_APP_KEY = "edu.cmu.cs.owf.APP_KEY";
     public static final String EXTRA_APP_SECRET = "edu.cmu.cs.owf.APP_SECRET";
     public static final String EXTRA_MEETING_NUMBER = "edu.cmu.cs.owf.MEETING_NUMBER";
     public static final String EXTRA_MEETING_PASSWORD = "edu.cmu.cs.owf.MEETING_PASSWORD";
-
-    private static final int REQUEST_CODE = 999;
-    private static final String CALL_EXPERT = "CALL EXPERT";
-    private static final String REPORT = "REPORT";
     private static final String WCA_FSM_START = "WCA_FSM_START";
     private static final String WCA_FSM_END = "WCA_FSM_END";
     private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-
     private String step = WCA_FSM_START;
-
     private ServerComm serverComm;
-    private YuvToJPEGConverter yuvToJPEGConverter;
-    private CameraCapture cameraCapture;
-
     private TextToSpeech textToSpeech;
     private ImageViewUpdater instructionViewUpdater;
     private ImageView instructionImage;
@@ -142,6 +117,7 @@ public class MainActivity extends AppCompatActivity {
     private final String recordFile = "THUMBSUP-2023-02-10-18-21-18-GMT.txt";
     private ArrayList<Long> frameTimeArr = new ArrayList<>();
     private ArrayList<Integer> frameSendResultArr = new ArrayList<>();
+    private ExecutorService pool;
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -188,6 +164,12 @@ public class MainActivity extends AppCompatActivity {
                 realStartTime = SystemClock.uptimeMillis();
                 logList.add(TAG + ": Start: " + realStartTime + "\n");
                 Log.i(TAG, "Profiling started.");
+
+                pool.execute(() -> {
+                    while (curFrameIndex + 1 < frameTimeArr.size()) {
+                        analyzeImage();
+                    }
+                });
             }
             step = toClientExtras.getStep();
             if (step.equals(WCA_FSM_END)) {
@@ -300,8 +282,6 @@ public class MainActivity extends AppCompatActivity {
         }
 
         videoFile = new File(this.getCacheDir(), VIDEO_NAME);
-        PreviewView viewFinder = findViewById(R.id.viewFinder);
-
         readyView = findViewById(R.id.readyView);
         readyTextView = findViewById(R.id.readyTextView);
         AssetManager assetManager = getAssets();
@@ -342,7 +322,7 @@ public class MainActivity extends AppCompatActivity {
             Scanner sc = new Scanner(new File(recordFolder, recordFile));
             if (sc.hasNextLine()) {
                 syncStartTime = Long.parseLong(sc.nextLine().split(": ")[2]);
-                Log.w(TAG, "Syncing start time: " + syncStartTime);
+                Log.i(TAG, "Syncing start time: " + syncStartTime);
             }
             while (sc.hasNextLine()) {
                 String[] frameRec = sc.nextLine().split(",");
@@ -371,7 +351,7 @@ public class MainActivity extends AppCompatActivity {
         registerReceiver(batteryReceiver, intentFilter);
 
         mBatteryManager = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
-
+        pool = Executors.newFixedThreadPool(1);
         timer = new Timer();
         timer.scheduleAtFixedRate(new LogTimerTask(), 0, TIMER_PERIOD);
 
@@ -396,9 +376,6 @@ public class MainActivity extends AppCompatActivity {
             serverComm.send(inputFrame, SOURCE, /* wait */ true);
         };
         this.textToSpeech = new TextToSpeech(getApplicationContext(), onInitListener);
-
-        yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
-        cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
 
         thumbsUpDetector = new ThumbsUpDetection(this);
         thumbsUpDetector.hands.setResultListener(
@@ -450,156 +427,121 @@ public class MainActivity extends AppCompatActivity {
                 .build();
     }
 
-    final private ImageAnalysis.Analyzer analyzer = new ImageAnalysis.Analyzer() {
-        @Override
-        public void analyze(@NonNull ImageProxy image) {
-            image.close();
+    private void analyzeImage() {
+        boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
+        if (step.equals(WCA_FSM_END) && !toWait) {
+            return;
+        }
 
-            boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
-            if (step.equals(WCA_FSM_END) && !toWait) {
+        if (realStartTime == 0) {
+            return;
+        }
+
+        // Get most concurrent frame from the recorded trace
+        boolean readyToSend = readyForServer;
+        long timeDiff;
+        // Always try to wait and use the next frame if possible
+        if (lastFrameIndex + 1 < frameTimeArr.size()) {
+            curFrameIndex = lastFrameIndex + 1;
+        }
+        while (curFrameIndex + 1 < frameTimeArr.size()) {
+            // Never skip or consume locally a frame that should be sent to the server
+            // Note that the last frame in the recorded trace will never be skipped and might be reused
+            if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
+                if (!readyToSend) {
+                    curFrameIndex = Integer.max(curFrameIndex - 1, lastFrameIndex);
+                }
+                break;
+            }
+
+            timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex + 1);
+            // If it runs slower than the recorded trace, skip frames when necessary
+            if (timeDiff > 0) {
+                curFrameIndex++;
+            } else {
+                break;
+            }
+        }
+
+        // Do not reuse frames even if it runs faster than the recorded trace
+        if (curFrameIndex == lastFrameIndex) {
+            if (curFrameIndex + 1 == frameTimeArr.size()) {
+                // Increase the current index and do not enter this function again
+                curFrameIndex++;
                 return;
             }
-
-            if (realStartTime == 0) {
-                return;
-            }
-
-            // Get most concurrent frame from the recorded trace
-            boolean readyToSend = readyForServer;
-            long timeDiff;
-            // Always try to wait and use the next frame if possible
-            if (lastFrameIndex + 1 < frameTimeArr.size()) {
-                curFrameIndex = lastFrameIndex + 1;
-            }
-            while (curFrameIndex + 1 < frameTimeArr.size()) {
-                // Never skip or consume locally a frame that should be sent to the server
-                // Note that the last frame in the recorded trace will never be skipped and might be reused
-                if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
-                    if (!readyToSend) {
-                        curFrameIndex = Integer.max(curFrameIndex - 1, lastFrameIndex);
-                    }
-                    break;
-                }
-
-                timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex + 1);
-                // If it runs slower than the recorded trace, skip frames when necessary
-                if (timeDiff > 0) {
-                    curFrameIndex++;
-                } else {
-                    break;
-                }
-            }
-
-            // Do not reuse frames even if it runs faster than the recorded trace
-            if (curFrameIndex == lastFrameIndex) {
-                if (curFrameIndex + 1 == frameTimeArr.size()) {
-                    return;
-                }
-                // Pause for the next frame
-                timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex + 1);
-                if (timeDiff < 0) {
-                    try {
-                        Thread.sleep(-timeDiff);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                }
-                return;
-            }
-
-            inputFrameCount++;
-//            Log.w(TAG, "inputCount / Cur / Last / Ready = " + inputFrameCount +
-//                    " / " + curFrameIndex + " / " + lastFrameIndex + " / " + readyForServer);
-            numFramesSkipped += Integer.max(curFrameIndex - lastFrameIndex - 1, 0);
-            lastFrameIndex = curFrameIndex;
-
-            // If it runs faster, pause until the timestamp of the chosen frame matches that from the recorded trace
-            timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex);
+            // Pause for the next frame
+            timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex + 1);
             if (timeDiff < 0) {
-                numFramesDelayed++;
                 try {
                     Thread.sleep(-timeDiff);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
             }
+            return;
+        }
 
-            File jpegFrame = new File(recordFolder, "THUMBSUP-" + frameTimeArr.get(curFrameIndex) + ".jpg");
+        inputFrameCount++;
+//        Log.w(TAG, "inputCount / Cur / Last / Ready = " + inputFrameCount +
+//                " / " + curFrameIndex + " / " + lastFrameIndex + " / " + readyForServer);
+        numFramesSkipped += Integer.max(curFrameIndex - lastFrameIndex - 1, 0);
+        lastFrameIndex = curFrameIndex;
+
+        // If it runs faster, pause until the timestamp of the chosen frame matches that from the recorded trace
+        timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex);
+        if (timeDiff < 0) {
+            numFramesDelayed++;
             try {
-                byte[] jpegBytes = Files.readAllBytes(jpegFrame.toPath());
-
-                if (readyToSend) {
-                    // For determinism, ensure that the same frames are sent to the server
-                    if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
-                        ToServerExtras.ClientCmd clientCmd = prepCommand;
-                        prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-                        serverComm.sendSupplier(() -> {
-                            ByteString jpegByteString = ByteString.copyFrom(jpegBytes);
-
-                            ToServerExtras toServerExtras = ToServerExtras.newBuilder()
-                                    .setStep(MainActivity.this.step)
-                                    .setClientCmd(clientCmd)
-                                    .build();
-
-                            return InputFrame.newBuilder()
-                                    .setPayloadType(PayloadType.IMAGE)
-                                    .addPayloads(jpegByteString)
-                                    .setExtras(pack(toServerExtras))
-                                    .build();
-                        }, SOURCE, true);
-                    }
-                } else {
-                    // A few frames that should be consumed here might be dropped due to the
-                    // server's delayed response, but this level of inconsistency is tolerable
-                    Bitmap bitmapImage = BitmapFactory.decodeStream(
-                            new ByteArrayInputStream(jpegBytes));
-                    thumbsUpDetector.hands.send(bitmapImage, SystemClock.uptimeMillis());
-                }
-
-            } catch (IOException e) {
+                Thread.sleep(-timeDiff);
+            } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }
-    };
+
+        File jpegFrame = new File(recordFolder, "THUMBSUP-" + frameTimeArr.get(curFrameIndex) + ".jpg");
+        try {
+            byte[] jpegBytes = Files.readAllBytes(jpegFrame.toPath());
+
+            if (readyToSend) {
+                // For determinism, ensure that the same frames are sent to the server
+                if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
+                    ToServerExtras.ClientCmd clientCmd = prepCommand;
+                    prepCommand = ToServerExtras.ClientCmd.NO_CMD;
+                    serverComm.sendSupplier(() -> {
+                        ByteString jpegByteString = ByteString.copyFrom(jpegBytes);
+
+                        ToServerExtras toServerExtras = ToServerExtras.newBuilder()
+                                .setStep(MainActivity.this.step)
+                                .setClientCmd(clientCmd)
+                                .build();
+
+                        return InputFrame.newBuilder()
+                                .setPayloadType(PayloadType.IMAGE)
+                                .addPayloads(jpegByteString)
+                                .setExtras(pack(toServerExtras))
+                                .build();
+                    }, SOURCE, true);
+                }
+            } else {
+                // A few frames that should be consumed here might be dropped due to the
+                // server's delayed response, but this level of inconsistency is tolerable
+                Bitmap bitmapImage = BitmapFactory.decodeStream(
+                        new ByteArrayInputStream(jpegBytes));
+                thumbsUpDetector.hands.send(bitmapImage, SystemClock.uptimeMillis());
+            }
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        cameraCapture.shutdown();
         // TODO: Clean up the Zoom session?
     }
 
     public void startVoiceRecognition(View view) {
-        final Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        startActivityForResult(intent, REQUEST_CODE);
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-
-        if (resultCode == RESULT_OK) {
-            final List<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-            Log.d(TAG, "ASR results: " + results.toString());
-            if (results.size() > 0 && !results.get(0).isEmpty()) {
-                String spokenText = results.get(0);
-                // TODO: Use more keywords for starting Zoom or sending error report
-                if (spokenText.toUpperCase().contains(CALL_EXPERT)) {
-                    this.textToSpeech.speak("Calling expert now.",
-                            TextToSpeech.QUEUE_FLUSH, null, null);
-                    this.reqCommand = ToServerExtras.ClientCmd.ZOOM_START;
-                } else if (spokenText.toUpperCase().contains(REPORT)) {
-                    this.reqCommand = ToServerExtras.ClientCmd.REPORT;
-                    // TODO: Send error report
-                    //  Let the server return this feedback message audio
-                    final String feedback = "An error log has been recorded. We appreciate your feedback.";
-                    this.textToSpeech.speak(feedback, TextToSpeech.QUEUE_FLUSH, null, null);
-                }
-            }
-        } else {
-            Log.d(TAG, "ASR Result not OK");
-        }
     }
 }
