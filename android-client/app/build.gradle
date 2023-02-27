@@ -15,8 +15,7 @@ android {
     buildToolsVersion "29.0.3"
 
     defaultConfig {
-        applicationId 'edu.cmu.cs.owf_prof_demo'
-        applicationId 'edu.cmu.cs.owf_prof_thumbsup_vuzix_rec'
+        applicationId 'edu.cmu.cs.cloudlet_thumbsup_vuzix_rec'
         minSdkVersion 24
         targetSdkVersion 33
         versionCode 1

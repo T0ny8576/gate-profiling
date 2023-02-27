@@ -40,8 +40,6 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
 
@@ -81,7 +79,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String WCA_FSM_END = "WCA_FSM_END";
     private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-
+    private boolean readyForServer = false;
     private String step = WCA_FSM_START;
 
     private ServerComm serverComm;
@@ -99,12 +97,9 @@ public class MainActivity extends AppCompatActivity {
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
     private final String LOGFILE = "DEMO-" + sdf.format(new Date()) + ".txt";
 
-
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
     private FileWriter logFileWriter;
-    private Timer timer;
     private int inputFrameCount = 0;
-    private static final long TIMER_PERIOD = 1000;
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -282,9 +277,6 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
 
-//        timer = new Timer();
-//        timer.scheduleAtFixedRate(new LogTimerTask(), 0, TIMER_PERIOD);
-
         Consumer<ErrorType> onDisconnect = errorType -> {
             Log.e(TAG, "Disconnect Error: " + errorType.name());
             finish();
@@ -302,6 +294,7 @@ public class MainActivity extends AppCompatActivity {
             // We need to wait for textToSpeech to be initialized before asking for the first
             // instruction.
             serverComm.send(inputFrame, SOURCE, /* wait */ true);
+            readyForServer = true;
         };
         this.textToSpeech = new TextToSpeech(this, onInitListener);
 
@@ -309,16 +302,7 @@ public class MainActivity extends AppCompatActivity {
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
     }
 
-//    class LogTimerTask extends TimerTask {
-//        @Override
-//        public void run() {
-//        }
-//    }
-
     private void writeLog() {
-        timer.cancel();
-        timer.purge();
-//        unregisterReceiver(batteryReceiver);
         try {
             for (String logString: logList) {
                 logFileWriter.write(logString);
@@ -342,12 +326,11 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void analyze(@NonNull ImageProxy image) {
             boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
-            if (step.equals(WCA_FSM_END) && !toWait) {
+            if ((!readyForServer || step.equals(WCA_FSM_END)) && !toWait) {
                 image.close();
                 return;
             }
             inputFrameCount++;
-            Log.w(TAG, "analyzer: " + SystemClock.uptimeMillis());
             ByteString jpegByteString = yuvToJPEGConverter.convert(image);
             byte[] jpegBytes = jpegByteString.toByteArray();
             long jpegTime = SystemClock.uptimeMillis();
