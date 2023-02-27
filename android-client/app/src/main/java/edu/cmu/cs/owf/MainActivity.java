@@ -48,6 +48,7 @@ import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
 import edu.cmu.cs.gabriel.camera.YuvToJPEGConverter;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
+import edu.cmu.cs.gabriel.client.results.SendSupplierResult;
 import edu.cmu.cs.gabriel.protocol.Protos.InputFrame;
 import edu.cmu.cs.gabriel.protocol.Protos.ResultWrapper;
 import edu.cmu.cs.gabriel.protocol.Protos.PayloadType;
@@ -95,7 +96,9 @@ public class MainActivity extends AppCompatActivity {
     private File videoFile;
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
-    private final String LOGFILE = "DEMO-" + sdf.format(new Date()) + ".txt";
+    private final String dateString = sdf.format(new Date());
+    private final String LOGFILE = "CLOUDLET-" + dateString + ".txt";
+    private File logFolder;
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
     private FileWriter logFileWriter;
@@ -268,9 +271,13 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        File logFile = new File(getExternalFilesDir(null), LOGFILE);
+        logFolder = new File(getExternalFilesDir(null), dateString);
+        if (!logFolder.exists()) {
+            logFolder.mkdir();
+        }
+        File logFile = new File(logFolder, LOGFILE);
         logFile.delete();
-        logFile = new File(getExternalFilesDir(null), LOGFILE);
+        logFile = new File(logFolder, LOGFILE);
         try {
             logFileWriter = new FileWriter(logFile, true);
         } catch (IOException e) {
@@ -335,8 +342,8 @@ public class MainActivity extends AppCompatActivity {
             byte[] jpegBytes = jpegByteString.toByteArray();
             long jpegTime = SystemClock.uptimeMillis();
             try {
-                File jpegFile = new File(getExternalFilesDir(null),
-                        "THUMBSUP-" + jpegTime + ".jpg");
+                File jpegFile = new File(logFolder,
+                        "CLOUDLET-" + jpegTime + ".jpg");
                 if (jpegFile.exists()) {
                     jpegFile.delete();
                 }
@@ -349,7 +356,7 @@ public class MainActivity extends AppCompatActivity {
 
             ToServerExtras.ClientCmd clientCmd = prepCommand;
             prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-            serverComm.sendSupplier(() -> {
+            SendSupplierResult sendResult = serverComm.sendSupplier(() -> {
                 ToServerExtras toServerExtras = ToServerExtras.newBuilder()
                         .setStep(MainActivity.this.step)
                         .setClientCmd(clientCmd)
@@ -361,6 +368,7 @@ public class MainActivity extends AppCompatActivity {
                         .setExtras(pack(toServerExtras))
                         .build();
             }, SOURCE, /* wait */ toWait);
+            logList.add(jpegTime + ",CLOUDLET-" + jpegTime + ".jpg," + step + "," + sendResult.ordinal() + "\n");
 
             // The image has either been sent or skipped. It is therefore safe to close the image.
             image.close();
