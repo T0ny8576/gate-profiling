@@ -434,6 +434,8 @@ class InferenceEngine(cognitive_engine.Engine):
         detector_dir = callable_args[DETECTOR_PATH]
         detector = self._states_models.get_object_detector(detector_dir)
 
+        if not input_frame.payloads:
+            return self._result_wrapper_for(step)
         np_data = np.frombuffer(input_frame.payloads[0], dtype=np.uint8)
         img_bgr = cv2.imdecode(np_data, cv2.IMREAD_COLOR)
         img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
