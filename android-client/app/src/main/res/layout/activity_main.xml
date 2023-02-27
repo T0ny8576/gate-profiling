@@ -22,11 +22,11 @@
         android:id="@+id/readyTextView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="24dp"
+        android:layout_marginStart="20dp"
+        android:layout_marginBottom="20dp"
         android:text="@string/thumb"
         app:layout_constraintBottom_toTopOf="@+id/button4"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/instructionImage" />
+        app:layout_constraintStart_toStartOf="parent" />
 
     <ImageView
         android:id="@+id/instructionImage"
@@ -57,12 +57,12 @@
         android:id="@+id/readyView"
         android:layout_width="64dp"
         android:layout_height="64dp"
-        android:layout_marginStart="24dp"
+        android:layout_marginStart="20dp"
+        android:layout_marginBottom="20dp"
         app:layout_constraintBottom_toTopOf="@+id/button4"
-        app:layout_constraintStart_toEndOf="@+id/readyTextView"
-        app:layout_constraintTop_toBottomOf="@+id/instructionImage" />
+        app:layout_constraintStart_toEndOf="@+id/readyTextView" />
 
-    <androidx.camera.view.PreviewView
+    <ImageView
         android:id="@+id/viewFinder"
         android:layout_width="384dp"
         android:layout_height="216dp"
