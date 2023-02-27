@@ -8,81 +8,52 @@
 
     <VideoView
         android:id="@+id/instructionVideo"
-        android:layout_width="24dp"
-        android:layout_height="18dp"
-        android:layout_marginTop="72dp"
+        android:layout_width="100dp"
+        android:layout_height="100dp"
+        android:layout_marginTop="88dp"
+        android:layout_marginEnd="48dp"
         android:contentDescription="@string/instruction_view_description"
         android:visibility="invisible"
         app:layout_constraintEnd_toStartOf="@+id/viewFinder"
-        app:layout_constraintHorizontal_bias="0.35"
-        app:layout_constraintStart_toEndOf="@+id/textView"
         app:layout_constraintTop_toTopOf="parent" />
 
     <TextView
         android:id="@+id/readyTextView"
-        android:layout_width="81dp"
-        android:layout_height="17dp"
-        android:layout_marginStart="16dp"
+        android:layout_width="130dp"
+        android:layout_height="20dp"
+        android:layout_marginStart="8dp"
         android:text="@string/thumb"
-        app:layout_constraintBottom_toTopOf="@+id/button4"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/instructionImage"
-        app:layout_constraintVertical_bias="0.87" />
+        app:layout_constraintBottom_toTopOf="@+id/readyView"
+        app:layout_constraintStart_toStartOf="parent" />
 
     <ImageView
         android:id="@+id/instructionImage"
-        android:layout_width="45dp"
-        android:layout_height="33dp"
-        android:layout_marginTop="28dp"
+        android:layout_width="100dp"
+        android:layout_height="100dp"
+        android:layout_marginEnd="15dp"
+        android:layout_marginBottom="15dp"
         android:contentDescription="@string/instruction_view_description"
         android:visibility="visible"
-        app:layout_constraintEnd_toStartOf="@+id/viewFinder"
-        app:layout_constraintHorizontal_bias="0.5"
-        app:layout_constraintStart_toEndOf="@+id/textView"
-        app:layout_constraintTop_toTopOf="parent" />
-
-    <TextView
-        android:id="@+id/textView"
-        android:layout_width="22dp"
-        android:layout_height="10dp"
-        android:text="@string/goal"
-        app:layout_constraintBottom_toBottomOf="@+id/instructionImage"
-        app:layout_constraintEnd_toStartOf="@+id/instructionImage"
-        app:layout_constraintHorizontal_bias="0.4"
-        app:layout_constraintHorizontal_chainStyle="packed"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="@+id/instructionImage"
-        app:layout_constraintVertical_bias="0.0" />
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <ImageView
         android:id="@+id/readyView"
-        android:layout_width="27dp"
-        android:layout_height="28dp"
-        android:layout_marginStart="12dp"
-        app:layout_constraintBottom_toTopOf="@+id/button4"
-        app:layout_constraintStart_toEndOf="@+id/readyTextView"
-        app:layout_constraintTop_toBottomOf="@+id/instructionImage"
-        app:layout_constraintVertical_bias="1.0" />
+        android:layout_width="60dp"
+        android:layout_height="60dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginBottom="16dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
     <androidx.camera.view.PreviewView
         android:id="@+id/viewFinder"
-        android:layout_width="100dp"
-        android:layout_height="74dp"
-        android:layout_marginEnd="4dp"
+        android:layout_width="240dp"
+        android:layout_height="135dp"
+        android:layout_marginEnd="5dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0.15" />
-
-    <Button
-        android:id="@+id/button4"
-        android:layout_width="32dp"
-        android:layout_height="22dp"
-        android:layout_marginStart="16dp"
-        android:layout_marginBottom="16dp"
-        android:onClick="startVoiceRecognition"
-        android:text="@string/start_asr"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        app:layout_constraintVertical_bias="0.16" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
