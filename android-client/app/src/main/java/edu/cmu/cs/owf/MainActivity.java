@@ -337,11 +337,11 @@ public class MainActivity extends AppCompatActivity {
                 ToServerExtras.ClientCmd clientCmd = prepCommand;
                 prepCommand = ToServerExtras.ClientCmd.NO_CMD;
 
-                ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-                rgbaBitmap.compress(Bitmap.CompressFormat.JPEG, 100, byteArrayOutputStream);
-                ByteString imageByteString = ByteString.copyFrom(byteArrayOutputStream.toByteArray());
-
                 serverComm.sendSupplier(() -> {
+                    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                    rgbaBitmap.compress(Bitmap.CompressFormat.JPEG, 100, byteArrayOutputStream);
+                    ByteString imageByteString = ByteString.copyFrom(byteArrayOutputStream.toByteArray());
+
                     ToServerExtras toServerExtras = ToServerExtras.newBuilder()
                             .setStep(MainActivity.this.step)
                             .setClientCmd(clientCmd)
