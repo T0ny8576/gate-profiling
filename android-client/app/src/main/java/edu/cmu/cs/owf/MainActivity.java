@@ -526,11 +526,11 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 // A few frames that should be consumed here might be dropped due to the
                 // server's delayed response, but this level of inconsistency is tolerable
-                Bitmap bitmapImage = BitmapFactory.decodeStream(
-                        new ByteArrayInputStream(jpegBytes));
+                ByteArrayInputStream bais = new ByteArrayInputStream(jpegBytes);
+                Bitmap bitmapImage = BitmapFactory.decodeStream(bais);
+                bais.close();
                 thumbsUpDetector.hands.send(bitmapImage, SystemClock.uptimeMillis());
             }
-
         } catch (IOException e) {
             e.printStackTrace();
         }
