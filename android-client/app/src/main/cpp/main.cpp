@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------
 // %BANNER_END%
 
-#define ALOG_TAG "com.magicleap.capi.camera-lib"
+//#define ALOG_TAG "com.magicleap.capi.camera-lib"
 
 #include <jni.h>
 
@@ -22,11 +22,11 @@
 
 #ifdef ML_LUMIN
 #include <EGL/egl.h>
-#define EGL_EGLEXT_PROTOTYPES
+//#define EGL_EGLEXT_PROTOTYPES
 #include <EGL/eglext.h>
 #endif
 
-#define UNWRAP_RET_MEDIARESULT(res) UNWRAP_RET_MLRESULT_GENERIC(res, UNWRAP_MLMEDIA_RESULT);
+//#define UNWRAP_RET_MEDIARESULT(res) UNWRAP_RET_MLRESULT_GENERIC(res, UNWRAP_MLMEDIA_RESULT);
 
 namespace EnumHelpers {
 const char *GetMLCameraErrorString(const MLCameraError &err) {
@@ -48,7 +48,7 @@ const char *GetMLCameraDisconnectReasonString(const MLCameraDisconnectReason &re
     default: return "Invalid MLCameraDisconnectReason value!";
   }
 }
-}  // namespace EnumHelpers
+}
 
 using namespace std::chrono_literals;
 
@@ -61,30 +61,7 @@ public:
         capture_height_(height),  ///> 1080
         is_frame_available_(false),
         camera_context_(ML_INVALID_HANDLE)
-//        screen_distance_(2.5f)  ///> Screen distance from the origin, in meters
   {}
-
-//  void OnStart() override {
-//    SetupPreview();
-//  }
-
-//  void OnResume() override {
-//    if (ArePermissionsGranted()) {
-//      SetupRestrictedResources();
-//    }
-//  }
-
-//  void OnPause() override {
-//    ASSERT_MLRESULT(StopCapture());
-//    UNWRAP_MLRESULT(DestroyCamera());
-//  }
-
-//  void OnRenderCamera(std::shared_ptr<ml::app_framework::CameraComponent>) override {
-//    if (is_frame_available_) {
-//      SetNewFrame(framebuffer_.data());
-//      is_frame_available_ = false;
-//    }
-//  }
 
   void SetupRestrictedResources() {
     SetupCamera();
@@ -124,37 +101,6 @@ public:
     }
     return MLResult_Ok;
   }
-
-//  void SetupPreview() {
-//    // Creation of standard OGL 2D texture
-//    glGenTextures(1, &texture_id_);
-//    glBindTexture(GL_TEXTURE_2D, texture_id_);
-//    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, capture_width_, capture_height_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-//    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-//    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-//    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-//    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-//
-//    // Feeding the textures to the Node class, so it can take care of rendering for us
-//    auto tex = std::make_shared<Texture>(GL_TEXTURE_2D, texture_id_, capture_width_, capture_height_, true);
-//    auto quad = Registry::GetInstance()->GetResourcePool()->GetMesh<QuadMesh>();
-//    auto gui_mat = std::make_shared<TexturedMaterial>(tex);
-//    gui_mat->SetPolygonMode(GL_FILL);
-//    auto gui_renderable = std::make_shared<RenderableComponent>(quad, gui_mat);
-//    auto gui_node_ = std::make_shared<Node>();
-//    gui_node_->SetLocalTranslation({0.0f, 0.0f, -screen_distance_});  //> Move the surface away from the user
-//    gui_node_->SetLocalScale({static_cast<float>(capture_width_) / capture_height_, 1.f,
-//                              1.f});                     //> Rescale the surface to the video's aspect ratio
-//    gui_node_->SetLocalRotation({0.f, -1.f, 0.f, 0.f});  //> Quaternion for 180deg rotation in X axis
-//    gui_node_->AddComponent(gui_renderable);
-//    GetRoot()->AddChild(gui_node_);
-//  }
-
-//  void SetNewFrame(void *data) {
-//    glBindTexture(GL_TEXTURE_2D, texture_id_);
-//    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, capture_width_, capture_height_, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-//    glBindTexture(GL_TEXTURE_2D, 0);
-//  }
 
   MLResult SetupCamera() {
     if (IsCameraInitialized()) {
@@ -270,7 +216,6 @@ public:
   int32_t capture_width_, capture_height_;
   std::atomic_bool is_frame_available_;
   MLCameraContext camera_context_;
-//  const float screen_distance_;
   uint8_t framebuffer_[1920 * 1080 * 4];  ///> 4-byte-per-pixel format, at max 1920 * 1080
 };
 
@@ -296,4 +241,11 @@ Java_edu_cmu_cs_owf_ML2CameraCapture_getFrame(JNIEnv *env,
     return bytesCopied;
   }
   return nullptr;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_edu_cmu_cs_owf_ML2CameraCapture_stopCamera(JNIEnv *env,
+                                                jobject instance) {
+  pML2CamObj->StopCapture();
+  pML2CamObj->DestroyCamera();
 }

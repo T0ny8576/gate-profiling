@@ -4,13 +4,10 @@ import android.graphics.Bitmap;
 import android.widget.ImageView;
 
 public class ML2CameraCapture {
-    private static final String TAG = "ML2CameraCapture";
-    private MainActivity mainActivity;
-    private ImageView imagePreview;
-    private int width;
-    private int height;
-    public ML2CameraCapture(MainActivity activity, int width, int height, ImageView imageView) {
-        mainActivity = activity;
+    private final ImageView imagePreview;
+    private final int width;
+    private final int height;
+    public ML2CameraCapture(int width, int height, ImageView imageView) {
         imagePreview = imageView;
         width = Integer.min(1920, width);
         height = Integer.min(1080, height);
@@ -45,9 +42,15 @@ public class ML2CameraCapture {
         return bitmap;
     }
 
+    public void shutdown() {
+        stopCamera();
+    }
+
     private native void createCamera(int width, int height);
 
     private native byte[] getFrame(int size);
+
+    private native void stopCamera();
 
     static {
         System.loadLibrary("ml_camera_lib");
