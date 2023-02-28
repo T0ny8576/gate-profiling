@@ -6,6 +6,7 @@ import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
@@ -91,6 +92,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView readyTextView;
     private VideoView instructionVideo;
     private File videoFile;
+    private static final int PERMISSION_REQUEST_CODE = 440;
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
     private final String LOGFILE = "THUMBSUP-" + sdf.format(new Date()) + ".txt";
@@ -270,17 +272,47 @@ public class MainActivity extends AppCompatActivity {
 //        }
 
         // Permissions for ODG, Magicleap, and Google Glass
-        String[] permissions = new String[] {
-                Manifest.permission.INTERNET, Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE};
+        String[] permissions = new String[] {Manifest.permission.CAMERA,
+                                             Manifest.permission.RECORD_AUDIO,
+                                             Manifest.permission.WRITE_EXTERNAL_STORAGE};
+        boolean permissionGranted = true;
         for (String permission : permissions) {
             if (ContextCompat.checkSelfPermission(this, permission) !=
                     PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(permissions, 0);
+                permissionGranted = false;
                 break;
             }
         }
+        if (permissionGranted) {
+            initActivity();
+        } else {
+            requestPermissions(permissions, PERMISSION_REQUEST_CODE);
+        }
+    }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+                                           @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            boolean permissionGranted = true;
+            for (String permission : permissions) {
+                if (ContextCompat.checkSelfPermission(this, permission) !=
+                        PackageManager.PERMISSION_GRANTED) {
+                    permissionGranted = false;
+                    break;
+                }
+            }
+            if (permissionGranted) {
+                initActivity();
+            } else {
+                finish();
+            }
+        }
+    }
+
+    private void initActivity() {
         videoFile = new File(this.getCacheDir(), VIDEO_NAME);
         readyView = findViewById(R.id.readyView);
         readyTextView = findViewById(R.id.readyTextView);
