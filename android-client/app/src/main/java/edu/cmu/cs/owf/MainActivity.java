@@ -4,12 +4,7 @@ import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.camera.core.CameraSelector;
-import androidx.camera.core.ImageAnalysis;
-import androidx.camera.core.ImageProxy;
-import androidx.camera.view.PreviewView;
 
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
@@ -17,6 +12,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.AssetManager;
+import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
 import android.os.BatteryManager;
@@ -33,6 +29,7 @@ import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
@@ -44,11 +41,11 @@ import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
-import edu.cmu.cs.gabriel.camera.CameraCapture;
 import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
-import edu.cmu.cs.gabriel.camera.YuvToJPEGConverter;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
 import edu.cmu.cs.gabriel.protocol.Protos.InputFrame;
@@ -89,8 +86,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     boolean readyForServer = false;
 
     private ServerComm serverComm;
-    private YuvToJPEGConverter yuvToJPEGConverter;
-    private CameraCapture cameraCapture;
+    private ML2CameraCapture cameraCapture;
 
     TextToSpeech textToSpeech;
     private ImageViewUpdater instructionViewUpdater;
@@ -110,6 +106,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     private Timer timer;
     private int inputFrameCount = 0;
     private static final long TIMER_PERIOD = 1000;
+    private ExecutorService pool;
 
     private static final String KWS_SEARCH = "keyword";
     private static final String KEYPHRASE = "ready for detection";
@@ -160,6 +157,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                 logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
                 inputFrameCount = 1;
                 Log.i(TAG, "Profiling started.");
+                processCameraFrame();
             }
             step = toClientExtras.getStep();
             if (step.equals(WCA_FSM_END)) {
@@ -250,7 +248,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         setContentView(R.layout.activity_main);
 
         videoFile = new File(this.getCacheDir(), VIDEO_NAME);
-        PreviewView viewFinder = findViewById(R.id.viewFinder);
+        ImageView viewFinder = findViewById(R.id.viewFinder);
 
         readyView = findViewById(R.id.readyView);
         readyTextView = findViewById(R.id.readyTextView);
@@ -344,8 +342,46 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         };
         this.textToSpeech = new TextToSpeech(this, onInitListener);
 
-        yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
-        cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
+        cameraCapture = new ML2CameraCapture(WIDTH, HEIGHT, viewFinder);
+        pool = Executors.newFixedThreadPool(1);
+    }
+
+    private void processCameraFrame() {
+        pool.execute(()-> {
+            while (true) {
+                Bitmap rgbaBitmap = cameraCapture.updateImagePreview();
+                if (rgbaBitmap == null) {
+                    continue;
+                }
+
+                boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
+                if (step.equals(WCA_FSM_END) && !toWait) {
+                    continue;
+                }
+                inputFrameCount++;
+                if (readyForServer) {
+                    ToServerExtras.ClientCmd clientCmd = prepCommand;
+                    prepCommand = ToServerExtras.ClientCmd.NO_CMD;
+
+                    serverComm.sendSupplier(() -> {
+                        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                        rgbaBitmap.compress(Bitmap.CompressFormat.JPEG, 100, byteArrayOutputStream);
+                        ByteString imageByteString = ByteString.copyFrom(byteArrayOutputStream.toByteArray());
+
+                        ToServerExtras toServerExtras = ToServerExtras.newBuilder()
+                                .setStep(MainActivity.this.step)
+                                .setClientCmd(clientCmd)
+                                .build();
+
+                        return InputFrame.newBuilder()
+                                .setPayloadType(PayloadType.IMAGE)
+                                .addPayloads(imageByteString)
+                                .setExtras(pack(toServerExtras))
+                                .build();
+                    }, SOURCE, /* wait */ toWait);
+                }
+            }
+        });
     }
 
     class LogTimerTask extends TimerTask {
@@ -380,38 +416,6 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                 .setValue(toServerExtras.toByteString())
                 .build();
     }
-
-    final private ImageAnalysis.Analyzer analyzer = new ImageAnalysis.Analyzer() {
-        @Override
-        public void analyze(@NonNull ImageProxy image) {
-            boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
-            if (step.equals(WCA_FSM_END) && !toWait) {
-                image.close();
-                return;
-            }
-            inputFrameCount++;
-            if (readyForServer) {
-                ToServerExtras.ClientCmd clientCmd = prepCommand;
-                prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-                serverComm.sendSupplier(() -> {
-                    ByteString jpegByteString = yuvToJPEGConverter.convert(image);
-
-                    ToServerExtras toServerExtras = ToServerExtras.newBuilder()
-                            .setStep(MainActivity.this.step)
-                            .setClientCmd(clientCmd)
-                            .build();
-
-                    return InputFrame.newBuilder()
-                            .setPayloadType(PayloadType.IMAGE)
-                            .addPayloads(jpegByteString)
-                            .setExtras(pack(toServerExtras))
-                            .build();
-                }, SOURCE, /* wait */ toWait);
-            }
-            // The image has either been sent or skipped. It is therefore safe to close the image.
-            image.close();
-        }
-    };
 
     @Override
     protected void onDestroy() {
