@@ -13,20 +13,21 @@
 
 cmake_minimum_required(VERSION 3.22.1)
 
-project(ml_camera_lib)
+project(ml2_api_lib)
 
 file(TO_CMAKE_PATH "$ENV{MLSDK}" MLSDK)
 list(APPEND CMAKE_MODULE_PATH "${MLSDK}/cmake" "${ANDROID_NDK}/../../mlsdk/cmake")
 
 find_package(MagicLeap REQUIRED)
 
-add_library(ml_camera_lib SHARED main.cpp)
+add_library(ml2_api_lib SHARED ml2_camera.cpp ml2_audio.cpp)
 
-target_link_libraries(ml_camera_lib
+target_link_libraries(ml2_api_lib
     ML::camera
+    ML::audio
     ML::media_error
 )
 
 if (COMMAND copy_artifacts)
-    copy_artifacts(ml_camera_lib)
+    copy_artifacts(ml2_api_lib)
 endif()

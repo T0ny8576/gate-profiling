@@ -320,7 +320,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
             recognizer = SpeechRecognizerSetup.defaultSetup()
                     .setAcousticModel(new File(assetsDir, "en-us-ptm"))
                     .setDictionary(new File(assetsDir, "cmudict-en-us.dict"))
-                    .getRecognizer();
+                    .getRecognizer(new ML2AudioCapture());
             recognizer.addListener(this);
 
             // Create keyword-activation search.
