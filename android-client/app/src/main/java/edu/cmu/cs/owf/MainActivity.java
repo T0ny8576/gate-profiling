@@ -89,7 +89,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String WCA_FSM_END = "WCA_FSM_END";
     private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-
+    private boolean logCompleted = false;
     private String step = WCA_FSM_START;
 
     private ServerComm serverComm;
@@ -164,13 +164,15 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
 
+            // TODO: Make member variables atomic if using more than 1 Gabriel Tokens
             if (step.equals(WCA_FSM_START)) {
                 logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
                 inputFrameCount = 1;
                 Log.i(TAG, "Profiling started.");
             }
             step = toClientExtras.getStep();
-            if (step.equals(WCA_FSM_END)) {
+            if (step.equals(WCA_FSM_END) && !logCompleted) {
+                logCompleted = true;
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
                 logList.add(TAG + ": Unique Images: " + uniqueCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
