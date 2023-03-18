@@ -63,9 +63,9 @@ import java.util.function.Consumer;
 
 import edu.cmu.cs.gabriel.camera.CameraCapture;
 import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
-import edu.cmu.cs.gabriel.camera.YuvToJPEGConverter;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
+import edu.cmu.cs.gabriel.client.results.SendSupplierResult;
 import edu.cmu.cs.gabriel.protocol.Protos.InputFrame;
 import edu.cmu.cs.gabriel.protocol.Protos.ResultWrapper;
 import edu.cmu.cs.gabriel.protocol.Protos.PayloadType;
@@ -101,7 +101,6 @@ public class MainActivity extends AppCompatActivity {
     private String step = WCA_FSM_START;
 
     private ServerComm serverComm;
-    private YuvToJPEGConverter yuvToJPEGConverter;
     private CameraCapture cameraCapture;
 
     private TextToSpeech textToSpeech;
@@ -126,9 +125,13 @@ public class MainActivity extends AppCompatActivity {
     private long syncStartTime;
     private long realStartTime = 0;
     private int curFrameIndex = 0;
-    private final File recordFolder = new File("/sdcard/traces/2023-01-23-14-45-40-EST");
-    private final String recordFile = "NO-GATING-2023-01-23-14-45-40-EST.txt";
+    private int lastFrameIndex = -1;
+    private int numFramesSkipped = 0;
+    private int numFramesDelayed = 0;
+    private final File recordFolder = new File("/sdcard/traces/2023-02-27-11-58-14-EST");
+    private final String recordFile = "NO-GATING-2023-02-27-11-58-14-EST.txt";
     private ArrayList<Long> frameTimeArr = new ArrayList<>();
+    private ArrayList<Integer> frameSendResultArr = new ArrayList<>();
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -180,6 +183,8 @@ public class MainActivity extends AppCompatActivity {
             if (step.equals(WCA_FSM_END)) {
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
+                logList.add(TAG + ": Number of frames skipped: " + numFramesSkipped + "\n");
+                logList.add(TAG + ": Number of frames delayed: " + numFramesDelayed + "\n");
                 writeLog();
                 Log.i(TAG, "Profiling completed.");
             }
@@ -267,26 +272,26 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-//        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
-//        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-//            if (!Environment.isExternalStorageManager()) {
-//                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-//                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
-//                startActivity(intent);
-//            }
-//        }
-
-        // Permissions for ODG, Magicleap, and Google Glass
-        String[] permissions = new String[] {
-                Manifest.permission.INTERNET, Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE};
-        for (String permission : permissions) {
-            if (ContextCompat.checkSelfPermission(this, permission) !=
-                    PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(permissions, 0);
-                break;
+        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
+                startActivity(intent);
             }
         }
+
+//        // Permissions for ODG, Magicleap, and Google Glass
+//        String[] permissions = new String[] {
+//                Manifest.permission.INTERNET, Manifest.permission.READ_EXTERNAL_STORAGE,
+//                Manifest.permission.WRITE_EXTERNAL_STORAGE};
+//        for (String permission : permissions) {
+//            if (ContextCompat.checkSelfPermission(this, permission) !=
+//                    PackageManager.PERMISSION_GRANTED) {
+//                requestPermissions(permissions, 0);
+//                break;
+//            }
+//        }
 
         videoFile = new File(this.getCacheDir(), VIDEO_NAME);
         PreviewView viewFinder = findViewById(R.id.viewFinder);
@@ -337,6 +342,7 @@ public class MainActivity extends AppCompatActivity {
                 String[] frameRec = sc.nextLine().split(",");
                 if (frameRec.length == 4) {
                     frameTimeArr.add(Long.parseLong(frameRec[0]));
+                    frameSendResultArr.add(Integer.parseInt(frameRec[3]));
                 }
             }
         } catch (FileNotFoundException e) {
@@ -386,7 +392,6 @@ public class MainActivity extends AppCompatActivity {
         };
         this.textToSpeech = new TextToSpeech(getApplicationContext(), onInitListener);
 
-        yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
     }
 
@@ -433,40 +438,94 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // Get most concurrent frame from the recorded trace
             if (realStartTime == 0) {
                 return;
             }
-            inputFrameCount++;
+
+            // Get most concurrent frame from the recorded trace
+            // Always try to wait and use the next frame if possible
+            long timeDiff;
+            if (lastFrameIndex + 1 < frameTimeArr.size()) {
+                curFrameIndex = lastFrameIndex + 1;
+            }
             while (curFrameIndex + 1 < frameTimeArr.size()) {
-                if (syncStartTime + SystemClock.uptimeMillis() - realStartTime > frameTimeArr.get(curFrameIndex + 1)) {
+                // Never skip a frame that should be sent to the server
+                // Note that the last frame in the recorded trace will never be skipped and might be reused
+                if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
+                    break;
+                }
+
+                timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex + 1);
+                // If it runs slower than the recorded trace, skip frames when necessary
+                if (timeDiff > 0) {
                     curFrameIndex++;
                 } else {
                     break;
                 }
             }
+
+            // Do not reuse frames even if it runs faster than the recorded trace
+            if (curFrameIndex == lastFrameIndex) {
+                if (curFrameIndex + 1 == frameTimeArr.size()) {
+                    return;
+                }
+                // Pause for the next frame
+                timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex + 1);
+                if (timeDiff < 0) {
+                    try {
+                        Thread.sleep(-timeDiff);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+                return;
+            }
+
+            inputFrameCount++;
+//            Log.w(TAG, "inputCount / Cur / Last / NumSkipped / ShouldSend? = " + inputFrameCount +
+//                    " / " + curFrameIndex + " / " + lastFrameIndex + " / " + numFramesSkipped +
+//                    " / " + frameSendResultArr.get(curFrameIndex));
+            numFramesSkipped += Integer.max(curFrameIndex - lastFrameIndex - 1, 0);
+            lastFrameIndex = curFrameIndex;
+
+            // If it runs faster, pause until the timestamp of the chosen frame matches that from the recorded trace
+            timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex);
+            if (timeDiff < 0) {
+                numFramesDelayed++;
+                try {
+                    Thread.sleep(-timeDiff);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+
             File jpegFrame = new File(recordFolder, "NO-GATING-" + frameTimeArr.get(curFrameIndex) + ".jpg");
             try {
                 byte[] jpegBytes = Files.readAllBytes(jpegFrame.toPath());
-                ToServerExtras.ClientCmd clientCmd = prepCommand;
-                prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-                serverComm.sendSupplier(() -> {
-                    ByteString jpegByteString = ByteString.copyFrom(jpegBytes);
 
-                    ToServerExtras toServerExtras = ToServerExtras.newBuilder()
-                            .setStep(MainActivity.this.step)
-                            .setClientCmd(clientCmd)
-                            .build();
+                // For determinism, ensure that the same frames are sent to the server
+                if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
+                    ToServerExtras.ClientCmd clientCmd = prepCommand;
+                    prepCommand = ToServerExtras.ClientCmd.NO_CMD;
+                    serverComm.sendSupplier(() -> {
+                        ByteString jpegByteString = ByteString.copyFrom(jpegBytes);
 
-                    return InputFrame.newBuilder()
-                            .setPayloadType(PayloadType.IMAGE)
-                            .addPayloads(jpegByteString)
-                            .setExtras(pack(toServerExtras))
-                            .build();
-                }, SOURCE, /* wait */ toWait);
+                        ToServerExtras toServerExtras = ToServerExtras.newBuilder()
+                                .setStep(MainActivity.this.step)
+                                .setClientCmd(clientCmd)
+                                .build();
+
+                        return InputFrame.newBuilder()
+                                .setPayloadType(PayloadType.IMAGE)
+                                .addPayloads(jpegByteString)
+                                .setExtras(pack(toServerExtras))
+                                .build();
+                    }, SOURCE, true);
+                }
             } catch (IOException e) {
                 e.printStackTrace();
             }
+
         }
     };
 
