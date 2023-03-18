@@ -140,7 +140,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (step.equals(WCA_FSM_START)) {
                 logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
-                inputFrameCount = 1;
+                readyForServer = true;
                 Log.i(TAG, "Profiling started.");
             }
             step = toClientExtras.getStep();
@@ -294,7 +294,6 @@ public class MainActivity extends AppCompatActivity {
             // We need to wait for textToSpeech to be initialized before asking for the first
             // instruction.
             serverComm.send(inputFrame, SOURCE, /* wait */ true);
-            readyForServer = true;
         };
         this.textToSpeech = new TextToSpeech(this, onInitListener);
 
