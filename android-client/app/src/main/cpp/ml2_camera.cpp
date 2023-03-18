@@ -11,44 +11,12 @@
 // ---------------------------------------------------------------------
 // %BANNER_END%
 
-//#define ALOG_TAG "com.magicleap.capi.camera-lib"
-
 #include <jni.h>
 
 #include <condition_variable>
 
 #include <ml_camera_v2.h>
 #include <ml_media_error.h>
-
-#ifdef ML_LUMIN
-#include <EGL/egl.h>
-//#define EGL_EGLEXT_PROTOTYPES
-#include <EGL/eglext.h>
-#endif
-
-//#define UNWRAP_RET_MEDIARESULT(res) UNWRAP_RET_MLRESULT_GENERIC(res, UNWRAP_MLMEDIA_RESULT);
-
-namespace EnumHelpers {
-const char *GetMLCameraErrorString(const MLCameraError &err) {
-  switch (err) {
-    case MLCameraError::MLCameraError_None: return "";
-    case MLCameraError::MLCameraError_Invalid: return "Invalid/Unknown error";
-    case MLCameraError::MLCameraError_Disabled: return "Camera disabled";
-    case MLCameraError::MLCameraError_DeviceFailed: return "Camera device failed";
-    case MLCameraError::MLCameraError_ServiceFailed: return "Camera service failed";
-    case MLCameraError::MLCameraError_CaptureFailed: return "Capture failed";
-    default: return "Invalid MLCameraError value!";
-  }
-}
-
-const char *GetMLCameraDisconnectReasonString(const MLCameraDisconnectReason &reason) {
-  switch (reason) {
-    case MLCameraDisconnectReason::MLCameraDisconnect_DeviceLost: return "Device lost";
-    case MLCameraDisconnectReason::MLCameraDisconnect_PriorityLost: return "Priority lost";
-    default: return "Invalid MLCameraDisconnectReason value!";
-  }
-}
-}
 
 using namespace std::chrono_literals;
 
@@ -233,6 +201,9 @@ extern "C" JNIEXPORT jbyteArray JNICALL
 Java_edu_cmu_cs_owf_ML2CameraCapture_getFrame(JNIEnv *env,
                                               jobject instance,
                                               jint size) {
+  if (pML2CamObj == nullptr) {
+    return nullptr;
+  }
   if (pML2CamObj->is_frame_available_) {
     jbyteArray bytesCopied = env->NewByteArray(size * 4);
     env->SetByteArrayRegion(bytesCopied, 0, size * 4,
@@ -246,6 +217,9 @@ Java_edu_cmu_cs_owf_ML2CameraCapture_getFrame(JNIEnv *env,
 extern "C" JNIEXPORT void JNICALL
 Java_edu_cmu_cs_owf_ML2CameraCapture_stopCamera(JNIEnv *env,
                                                 jobject instance) {
+  if (pML2CamObj == nullptr) {
+    return;
+  }
   pML2CamObj->StopCapture();
   pML2CamObj->DestroyCamera();
 }

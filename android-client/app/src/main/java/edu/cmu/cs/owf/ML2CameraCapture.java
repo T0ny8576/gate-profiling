@@ -53,6 +53,6 @@ public class ML2CameraCapture {
     private native void stopCamera();
 
     static {
-        System.loadLibrary("ml_camera_lib");
+        System.loadLibrary("ml2_api_lib");
     }
 }
