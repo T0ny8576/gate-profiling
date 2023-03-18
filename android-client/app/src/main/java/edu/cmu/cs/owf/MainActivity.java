@@ -73,9 +73,6 @@ public class MainActivity extends AppCompatActivity {
     public static final String EXTRA_MEETING_NUMBER = "edu.cmu.cs.owf.MEETING_NUMBER";
     public static final String EXTRA_MEETING_PASSWORD = "edu.cmu.cs.owf.MEETING_PASSWORD";
 
-    private static final int REQUEST_CODE = 999;
-    private static final String CALL_EXPERT = "CALL EXPERT";
-    private static final String REPORT = "REPORT";
     private static final String WCA_FSM_START = "WCA_FSM_START";
     private static final String WCA_FSM_END = "WCA_FSM_END";
     private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
@@ -106,6 +103,7 @@ public class MainActivity extends AppCompatActivity {
 
     private ThumbsUpDetection thumbsUpDetector;
     private boolean readyForServer = false;
+    private boolean readyToCount = false;
     private long currentStepStartTime = 0;
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
@@ -151,7 +149,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (step.equals(WCA_FSM_START)) {
                 logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
-                inputFrameCount = 1;
+                readyToCount = true;
                 Log.i(TAG, "Profiling started.");
             }
             step = toClientExtras.getStep();
@@ -348,7 +346,7 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void analyze(@NonNull ImageProxy image) {
             boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
-            if (step.equals(WCA_FSM_END) && !toWait) {
+            if ((!readyToCount || step.equals(WCA_FSM_END)) && !toWait) {
                 image.close();
                 return;
             }
