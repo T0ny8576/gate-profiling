@@ -87,7 +87,7 @@ public class MainActivity extends AppCompatActivity {
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
     private final String dateString = sdf.format(new Date());
-    private final String LOGFILE = "TOGGLE-" + dateString + ".txt";
+    private final String LOGFILE = "TOGGLE.txt";
     private File logFolder;
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
