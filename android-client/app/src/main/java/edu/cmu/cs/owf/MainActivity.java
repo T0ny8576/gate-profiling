@@ -82,21 +82,21 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     public static final String EXTRA_MEETING_PASSWORD = "edu.cmu.cs.owf.MEETING_PASSWORD";
     private static final String WCA_FSM_START = "WCA_FSM_START";
     private static final String WCA_FSM_END = "WCA_FSM_END";
-    ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
+    private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-
+    private boolean readyForServer = false;
+    private boolean logCompleted = false;
     private String step = WCA_FSM_START;
-    boolean readyForServer = false;
 
     private ServerComm serverComm;
     private YuvToJPEGConverter yuvToJPEGConverter;
     private CameraCapture cameraCapture;
 
-    TextToSpeech textToSpeech;
+    private TextToSpeech textToSpeech;
     private ImageViewUpdater instructionViewUpdater;
     private ImageView instructionImage;
-    ImageView readyView;
-    TextView readyTextView;
+    private ImageView readyView;
+    private TextView readyTextView;
     private VideoView instructionVideo;
     private File videoFile;
 
@@ -156,13 +156,14 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                 });
             }
 
+            // TODO: Make member variables atomic if using more than 1 Gabriel Tokens
             if (step.equals(WCA_FSM_START)) {
                 logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
-                inputFrameCount = 1;
                 Log.i(TAG, "Profiling started.");
             }
             step = toClientExtras.getStep();
-            if (step.equals(WCA_FSM_END)) {
+            if (step.equals(WCA_FSM_END) && !logCompleted) {
+                logCompleted = true;
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
                 writeLog();
@@ -415,13 +416,13 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
     @Override
     protected void onDestroy() {
+        super.onDestroy();
         if (recognizer != null) {
             recognizer.cancel();
             recognizer.shutdown();
         }
         cameraCapture.shutdown();
         // TODO: Clean up the Zoom session?
-        super.onDestroy();
     }
 
     @Override

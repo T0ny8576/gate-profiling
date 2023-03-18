@@ -66,8 +66,6 @@ dependencies {
     implementation 'edu.cmu.cs.gabriel:protocol:2.0.1'
     implementation 'edu.cmu.cs.gabriel:camera:2.4.1'
 
-    implementation 'com.vuzix:sdk-speechrecognitionservice:1.95'
-
     def camerax_version = "1.0.0-rc03"
     // CameraX core library using camera2 implementation
     //noinspection GradleDependency
