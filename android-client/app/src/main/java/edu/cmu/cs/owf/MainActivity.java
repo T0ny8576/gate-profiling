@@ -104,6 +104,7 @@ public class MainActivity extends AppCompatActivity {
     private ThumbsUpDetection thumbsUpDetector;
     private boolean readyForServer = false;
     private boolean readyToCount = false;
+    private boolean logCompleted = false;
     private long currentStepStartTime = 0;
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
@@ -147,13 +148,15 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
 
+            // TODO: Make member variables atomic if using more than 1 Gabriel Tokens
             if (step.equals(WCA_FSM_START)) {
                 logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
                 readyToCount = true;
                 Log.i(TAG, "Profiling started.");
             }
             step = toClientExtras.getStep();
-            if (step.equals(WCA_FSM_END)) {
+            if (step.equals(WCA_FSM_END) && !logCompleted) {
+                logCompleted = true;
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
                 writeLog();
