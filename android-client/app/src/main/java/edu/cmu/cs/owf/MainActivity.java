@@ -94,7 +94,7 @@ public class MainActivity extends AppCompatActivity {
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
     private final String dateString = sdf.format(new Date());
-    private final String LOGFILE = "THUMBSUP-" + dateString + ".txt";
+    private final String LOGFILE = "THUMBSUP.txt";
     private File logFolder;
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
