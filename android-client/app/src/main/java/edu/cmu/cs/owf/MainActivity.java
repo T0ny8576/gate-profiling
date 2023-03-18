@@ -5,7 +5,6 @@ import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.camera.core.CameraSelector;
@@ -14,20 +13,14 @@ import androidx.camera.core.ImageProxy;
 import androidx.camera.view.PreviewView;
 
 import android.app.AlertDialog;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.media.MediaPlayer;
-import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.SystemClock;
-import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.view.View;
 import android.widget.ImageView;
-import android.widget.TextView;
 import android.widget.VideoView;
 
 import com.google.protobuf.Any;
@@ -38,13 +31,9 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.List;
 import java.util.Locale;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
 
@@ -53,6 +42,7 @@ import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
 import edu.cmu.cs.gabriel.camera.YuvToJPEGConverter;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
+import edu.cmu.cs.gabriel.client.results.SendSupplierResult;
 import edu.cmu.cs.gabriel.protocol.Protos.InputFrame;
 import edu.cmu.cs.gabriel.protocol.Protos.ResultWrapper;
 import edu.cmu.cs.gabriel.protocol.Protos.PayloadType;
@@ -76,15 +66,12 @@ public class MainActivity extends AppCompatActivity {
     public static final String EXTRA_APP_SECRET = "edu.cmu.cs.owf.APP_SECRET";
     public static final String EXTRA_MEETING_NUMBER = "edu.cmu.cs.owf.MEETING_NUMBER";
     public static final String EXTRA_MEETING_PASSWORD = "edu.cmu.cs.owf.MEETING_PASSWORD";
-
-    private static final int REQUEST_CODE = 999;
-    private static final String CALL_EXPERT = "CALL EXPERT";
-    private static final String REPORT = "REPORT";
     private static final String WCA_FSM_START = "WCA_FSM_START";
     private static final String WCA_FSM_END = "WCA_FSM_END";
     private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-
+    private boolean readyForServer = false;
+    private boolean logCompleted = false;
     private String step = WCA_FSM_START;
 
     private ServerComm serverComm;
@@ -99,15 +86,13 @@ public class MainActivity extends AppCompatActivity {
     private SwitchCompat sendFramesSwitch;
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
-    private final String LOGFILE = "SWITCH" + sdf.format(new Date()) + ".txt";
+    private final String dateString = sdf.format(new Date());
+    private final String LOGFILE = "TOGGLE-" + dateString + ".txt";
+    private File logFolder;
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
-    private BatteryManager mBatteryManager;
-    private BroadcastReceiver batteryReceiver;
     private FileWriter logFileWriter;
-    private Timer timer;
     private int inputFrameCount = 0;
-    private static final long TIMER_PERIOD = 1000;
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -150,13 +135,15 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
 
+            // TODO: Make member variables atomic if using more than 1 Gabriel Tokens
             if (step.equals(WCA_FSM_START)) {
                 logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
-                inputFrameCount = 1;
+                readyForServer = true;
                 Log.i(TAG, "Profiling started.");
             }
             step = toClientExtras.getStep();
-            if (step.equals(WCA_FSM_END)) {
+            if (step.equals(WCA_FSM_END) && !logCompleted) {
+                logCompleted = true;
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
                 writeLog();
@@ -237,6 +224,7 @@ public class MainActivity extends AppCompatActivity {
         instructionViewUpdater = new ImageViewUpdater(instructionImage);
 
         sendFramesSwitch = findViewById(R.id.sendFramesSwitch);
+        sendFramesSwitch.requestFocusFromTouch();
 
         instructionVideo = findViewById(R.id.instructionVideo);
 
@@ -248,34 +236,18 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        File logFile = new File(getExternalFilesDir(null), LOGFILE);
+        logFolder = new File(getExternalFilesDir(null), dateString);
+        if (!logFolder.exists()) {
+            logFolder.mkdir();
+        }
+        File logFile = new File(logFolder, LOGFILE);
         logFile.delete();
-        logFile = new File(getExternalFilesDir(null), LOGFILE);
+        logFile = new File(logFolder, LOGFILE);
         try {
             logFileWriter = new FileWriter(logFile, true);
         } catch (IOException e) {
             e.printStackTrace();
         }
-
-        IntentFilter intentFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
-        batteryReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                int voltage = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, Integer.MIN_VALUE);
-                int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, Integer.MIN_VALUE);
-                int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, Integer.MIN_VALUE);
-                String voltageMsg = TAG + ": Time: " + SystemClock.uptimeMillis() +
-                        "\tBattery voltage = " + voltage +
-                        " Level = " + level + "/" + scale + "\n";
-                logList.add(voltageMsg);
-            }
-        };
-        registerReceiver(batteryReceiver, intentFilter);
-
-        mBatteryManager = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
-
-        timer = new Timer();
-        timer.scheduleAtFixedRate(new LogTimerTask(), 0, TIMER_PERIOD);
 
         Consumer<ErrorType> onDisconnect = errorType -> {
             Log.e(TAG, "Disconnect Error: " + errorType.name());
@@ -285,7 +257,6 @@ public class MainActivity extends AppCompatActivity {
                 consumer, BuildConfig.GABRIEL_HOST, PORT, getApplication(), onDisconnect);
 
         TextToSpeech.OnInitListener onInitListener = i -> {
-            textToSpeech.setLanguage(Locale.US);
 
             ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep(step).build();
             InputFrame inputFrame = InputFrame.newBuilder()
@@ -302,20 +273,7 @@ public class MainActivity extends AppCompatActivity {
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
     }
 
-    class LogTimerTask extends TimerTask {
-        @Override
-        public void run() {
-            int current = mBatteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
-            String testMag = TAG + ": Time: " + SystemClock.uptimeMillis() +
-                    "\tCurrent: " + current + "\n";
-            logList.add(testMag);
-        }
-    }
-
     private void writeLog() {
-        timer.cancel();
-        timer.purge();
-        unregisterReceiver(batteryReceiver);
         try {
             for (String logString: logList) {
                 logFileWriter.write(logString);
@@ -339,19 +297,36 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void analyze(@NonNull ImageProxy image) {
             boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
-            if (step.equals(WCA_FSM_END) && !toWait) {
+            if ((!readyForServer ||step.equals(WCA_FSM_END)) && !toWait) {
                 image.close();
                 return;
             }
             inputFrameCount++;
+            ByteString jpegByteString = yuvToJPEGConverter.convert(image);
+            byte[] jpegBytes = jpegByteString.toByteArray();
+            long jpegTime = SystemClock.uptimeMillis();
+            try {
+                File jpegFile = new File(logFolder,
+                        "TOGGLE-" + jpegTime + ".jpg");
+                if (jpegFile.exists()) {
+                    jpegFile.delete();
+                }
+                FileOutputStream fos = new FileOutputStream(jpegFile.getPath());
+                fos.write(jpegBytes);
+                fos.close();
+            } catch (IOException e) {
+                Log.w(TAG, "Saving image failed: " + jpegTime);
+            }
+
             if (!sendFramesSwitch.isChecked()) {
+                logList.add(jpegTime + ",TOGGLE-" + jpegTime + ".jpg," + step + ",-1\n");
                 image.close();
                 return;
             }
+
             ToServerExtras.ClientCmd clientCmd = prepCommand;
             prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-            serverComm.sendSupplier(() -> {
-                ByteString jpegByteString = yuvToJPEGConverter.convert(image);
+            SendSupplierResult sendResult = serverComm.sendSupplier(() -> {
 
                 ToServerExtras toServerExtras = ToServerExtras.newBuilder()
                         .setStep(MainActivity.this.step)
@@ -364,6 +339,7 @@ public class MainActivity extends AppCompatActivity {
                         .setExtras(pack(toServerExtras))
                         .build();
             }, SOURCE, /* wait */ toWait);
+            logList.add(jpegTime + ",TOGGLE-" + jpegTime + ".jpg," + step + "," + sendResult.ordinal() + "\n");
 
             // The image has either been sent or skipped. It is therefore safe to close the image.
             image.close();
@@ -375,39 +351,5 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
         cameraCapture.shutdown();
         // TODO: Clean up the Zoom session?
-    }
-
-    public void startVoiceRecognition(View view) {
-        final Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        startActivityForResult(intent, REQUEST_CODE);
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-
-        if (resultCode == RESULT_OK) {
-            final List<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-            Log.d(TAG, "ASR results: " + results.toString());
-            if (results.size() > 0 && !results.get(0).isEmpty()) {
-                String spokenText = results.get(0);
-                // TODO: Use more keywords for starting Zoom or sending error report
-                if (spokenText.toUpperCase().contains(CALL_EXPERT)) {
-                    this.textToSpeech.speak("Calling expert now.",
-                            TextToSpeech.QUEUE_FLUSH, null, null);
-                    this.reqCommand = ToServerExtras.ClientCmd.ZOOM_START;
-                } else if (spokenText.toUpperCase().contains(REPORT)) {
-                    this.reqCommand = ToServerExtras.ClientCmd.REPORT;
-                    // TODO: Send error report
-                    //  Let the server return this feedback message audio
-                    final String feedback = "An error log has been recorded. We appreciate your feedback.";
-                    this.textToSpeech.speak(feedback, TextToSpeech.QUEUE_FLUSH, null, null);
-                }
-            }
-        } else {
-            Log.d(TAG, "ASR Result not OK");
-        }
     }
 }
