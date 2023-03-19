@@ -12,14 +12,10 @@ import androidx.camera.core.ImageProxy;
 import androidx.camera.view.PreviewView;
 
 import android.app.AlertDialog;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.res.AssetManager;
 import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
-import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.speech.tts.TextToSpeech;
@@ -41,8 +37,6 @@ import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
 
@@ -51,6 +45,7 @@ import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
 import edu.cmu.cs.gabriel.camera.YuvToJPEGConverter;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
+import edu.cmu.cs.gabriel.client.results.SendSupplierResult;
 import edu.cmu.cs.gabriel.protocol.Protos.InputFrame;
 import edu.cmu.cs.gabriel.protocol.Protos.ResultWrapper;
 import edu.cmu.cs.gabriel.protocol.Protos.PayloadType;
@@ -85,6 +80,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
     private boolean readyForServer = false;
+    private boolean readyToCount = false;
     private boolean logCompleted = false;
     private String step = WCA_FSM_START;
 
@@ -101,15 +97,13 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     private File videoFile;
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
-    private final String LOGFILE = "ASR-" + sdf.format(new Date()) + ".txt";
+    private final String dateString = sdf.format(new Date());
+    private final String LOGFILE = "ASR.txt";
+    private File logFolder;
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
-    private BatteryManager mBatteryManager;
-    private BroadcastReceiver batteryReceiver;
     private FileWriter logFileWriter;
-    private Timer timer;
     private int inputFrameCount = 0;
-    private static final long TIMER_PERIOD = 1000;
 
     private static final String KWS_SEARCH = "keyword";
     private static final String KEYPHRASE = "ready for detection";
@@ -159,6 +153,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
             // TODO: Make member variables atomic if using more than 1 Gabriel Tokens
             if (step.equals(WCA_FSM_START)) {
                 logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
+                readyToCount = true;
                 Log.i(TAG, "Profiling started.");
             }
             step = toClientExtras.getStep();
@@ -280,34 +275,18 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
             }
         });
 
-        File logFile = new File(getExternalFilesDir(null), LOGFILE);
+        logFolder = new File(getExternalFilesDir(null), dateString);
+        if (!logFolder.exists()) {
+            logFolder.mkdir();
+        }
+        File logFile = new File(logFolder, LOGFILE);
         logFile.delete();
-        logFile = new File(getExternalFilesDir(null), LOGFILE);
+        logFile = new File(logFolder, LOGFILE);
         try {
             logFileWriter = new FileWriter(logFile, true);
         } catch (IOException e) {
             e.printStackTrace();
         }
-
-        IntentFilter intentFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
-        batteryReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                int voltage = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, Integer.MIN_VALUE);
-                int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, Integer.MIN_VALUE);
-                int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, Integer.MIN_VALUE);
-                String voltageMsg = TAG + ": Time: " + SystemClock.uptimeMillis() +
-                        "\tBattery voltage = " + voltage +
-                        " Level = " + level + "/" + scale + "\n";
-                logList.add(voltageMsg);
-            }
-        };
-        registerReceiver(batteryReceiver, intentFilter);
-
-        mBatteryManager = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
-
-        timer = new Timer();
-        timer.scheduleAtFixedRate(new LogTimerTask(), 0, TIMER_PERIOD);
 
         Consumer<ErrorType> onDisconnect = errorType -> {
             Log.e(TAG, "Disconnect Error: " + errorType.name());
@@ -349,20 +328,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
     }
 
-    class LogTimerTask extends TimerTask {
-        @Override
-        public void run() {
-            int current = mBatteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
-            String testMag = TAG + ": Time: " + SystemClock.uptimeMillis() +
-                    "\tCurrent: " + current + "\n";
-            logList.add(testMag);
-        }
-    }
-
     private void writeLog() {
-        timer.cancel();
-        timer.purge();
-        unregisterReceiver(batteryReceiver);
         try {
             for (String logString: logList) {
                 logFileWriter.write(logString);
@@ -386,16 +352,31 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         @Override
         public void analyze(@NonNull ImageProxy image) {
             boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
-            if (step.equals(WCA_FSM_END) && !toWait) {
+            if ((!readyToCount || step.equals(WCA_FSM_END)) && !toWait) {
                 image.close();
                 return;
             }
             inputFrameCount++;
+            ByteString jpegByteString = yuvToJPEGConverter.convert(image);
+            byte[] jpegBytes = jpegByteString.toByteArray();
+            long jpegTime = SystemClock.uptimeMillis();
+            try {
+                File jpegFile = new File(logFolder,
+                        "ASR-" + jpegTime + ".jpg");
+                if (jpegFile.exists()) {
+                    jpegFile.delete();
+                }
+                FileOutputStream fos = new FileOutputStream(jpegFile.getPath());
+                fos.write(jpegBytes);
+                fos.close();
+            } catch (IOException e) {
+                Log.w(TAG, "Saving image failed: " + jpegTime);
+            }
+
             if (readyForServer) {
                 ToServerExtras.ClientCmd clientCmd = prepCommand;
                 prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-                serverComm.sendSupplier(() -> {
-                    ByteString jpegByteString = yuvToJPEGConverter.convert(image);
+                SendSupplierResult sendResult = serverComm.sendSupplier(() -> {
 
                     ToServerExtras toServerExtras = ToServerExtras.newBuilder()
                             .setStep(MainActivity.this.step)
@@ -408,6 +389,9 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                             .setExtras(pack(toServerExtras))
                             .build();
                 }, SOURCE, /* wait */ toWait);
+                logList.add(jpegTime + ",ASR-" + jpegTime + ".jpg," + step + "," + sendResult.ordinal() + "\n");
+            } else {
+                logList.add(jpegTime + ",ASR-" + jpegTime + ".jpg," + step + ",-1\n");
             }
             // The image has either been sent or skipped. It is therefore safe to close the image.
             image.close();
