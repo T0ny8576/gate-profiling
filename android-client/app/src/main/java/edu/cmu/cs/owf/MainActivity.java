@@ -47,7 +47,6 @@ import com.google.protobuf.InvalidProtocolBufferException;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
@@ -67,7 +66,6 @@ import java.util.function.Consumer;
 
 import edu.cmu.cs.gabriel.camera.CameraCapture;
 import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
-import edu.cmu.cs.gabriel.camera.YuvToJPEGConverter;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
 import edu.cmu.cs.gabriel.client.results.SendSupplierResult;
@@ -106,7 +104,6 @@ public class MainActivity extends AppCompatActivity {
     private String step = WCA_FSM_START;
 
     private ServerComm serverComm;
-    private YuvToJPEGConverter yuvToJPEGConverter;
     private CameraCapture cameraCapture;
 
     private TextToSpeech textToSpeech;
@@ -138,8 +135,8 @@ public class MainActivity extends AppCompatActivity {
     private int lastFrameIndex = -1;
     private int numFramesSkipped = 0;
     private int numFramesDelayed = 0;
-    private final File recordFolder = new File("/sdcard/traces/2023-02-10-18-21-18-GMT");
-    private final String recordFile = "THUMBSUP-2023-02-10-18-21-18-GMT.txt";
+    private final File recordFolder = new File("/sdcard/traces/THUMBSUP-Q-0");
+    private final String recordFile = "THUMBSUP.txt";
     private ArrayList<Long> frameTimeArr = new ArrayList<>();
     private ArrayList<Integer> frameSendResultArr = new ArrayList<>();
 
@@ -280,26 +277,26 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-//        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
-//        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-//            if (!Environment.isExternalStorageManager()) {
-//                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-//                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
-//                startActivity(intent);
-//            }
-//        }
-
-        // Permissions for ODG, Magicleap, and Google Glass
-        String[] permissions = new String[] {
-                Manifest.permission.INTERNET, Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE};
-        for (String permission : permissions) {
-            if (ContextCompat.checkSelfPermission(this, permission) !=
-                    PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(permissions, 0);
-                break;
+        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
+                startActivity(intent);
             }
         }
+
+//        // Permissions for ODG, Magicleap, and Google Glass
+//        String[] permissions = new String[] {
+//                Manifest.permission.INTERNET, Manifest.permission.READ_EXTERNAL_STORAGE,
+//                Manifest.permission.WRITE_EXTERNAL_STORAGE};
+//        for (String permission : permissions) {
+//            if (ContextCompat.checkSelfPermission(this, permission) !=
+//                    PackageManager.PERMISSION_GRANTED) {
+//                requestPermissions(permissions, 0);
+//                break;
+//            }
+//        }
 
         videoFile = new File(this.getCacheDir(), VIDEO_NAME);
         PreviewView viewFinder = findViewById(R.id.viewFinder);
@@ -399,7 +396,6 @@ public class MainActivity extends AppCompatActivity {
         };
         this.textToSpeech = new TextToSpeech(getApplicationContext(), onInitListener);
 
-        yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
 
         thumbsUpDetector = new ThumbsUpDetection(this);
