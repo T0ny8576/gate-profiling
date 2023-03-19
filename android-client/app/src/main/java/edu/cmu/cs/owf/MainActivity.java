@@ -101,7 +101,7 @@ public class MainActivity extends AppCompatActivity {
     private SwitchCompat sendFramesSwitch;
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
-    private final String LOGFILE = "SWITCH" + sdf.format(new Date()) + ".txt";
+    private final String LOGFILE = "TOGGLE-" + sdf.format(new Date()) + ".txt";
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
     private BatteryManager mBatteryManager;
