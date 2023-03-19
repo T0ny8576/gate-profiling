@@ -1,33 +1,38 @@
 package edu.cmu.cs.owf;
 
+import static android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION;
+
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.view.PreviewView;
+import androidx.core.content.ContextCompat;
 
+import android.Manifest;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.media.MediaPlayer;
+import android.net.Uri;
 import android.os.BatteryManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.SystemClock;
-import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.view.View;
 import android.widget.ImageView;
-import android.widget.TextView;
 import android.widget.VideoView;
 
 import com.google.protobuf.Any;
@@ -35,14 +40,16 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.io.InputStream;
+import java.nio.file.Files;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
-import java.util.List;
 import java.util.Locale;
+import java.util.Scanner;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -50,9 +57,9 @@ import java.util.function.Consumer;
 
 import edu.cmu.cs.gabriel.camera.CameraCapture;
 import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
-import edu.cmu.cs.gabriel.camera.YuvToJPEGConverter;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
+import edu.cmu.cs.gabriel.client.results.SendSupplierResult;
 import edu.cmu.cs.gabriel.protocol.Protos.InputFrame;
 import edu.cmu.cs.gabriel.protocol.Protos.ResultWrapper;
 import edu.cmu.cs.gabriel.protocol.Protos.PayloadType;
@@ -76,19 +83,14 @@ public class MainActivity extends AppCompatActivity {
     public static final String EXTRA_APP_SECRET = "edu.cmu.cs.owf.APP_SECRET";
     public static final String EXTRA_MEETING_NUMBER = "edu.cmu.cs.owf.MEETING_NUMBER";
     public static final String EXTRA_MEETING_PASSWORD = "edu.cmu.cs.owf.MEETING_PASSWORD";
-
-    private static final int REQUEST_CODE = 999;
-    private static final String CALL_EXPERT = "CALL EXPERT";
-    private static final String REPORT = "REPORT";
     private static final String WCA_FSM_START = "WCA_FSM_START";
     private static final String WCA_FSM_END = "WCA_FSM_END";
     private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-
+    private boolean logCompleted = false;
     private String step = WCA_FSM_START;
 
     private ServerComm serverComm;
-    private YuvToJPEGConverter yuvToJPEGConverter;
     private CameraCapture cameraCapture;
 
     private TextToSpeech textToSpeech;
@@ -108,6 +110,17 @@ public class MainActivity extends AppCompatActivity {
     private Timer timer;
     private int inputFrameCount = 0;
     private static final long TIMER_PERIOD = 1000;
+
+    private long syncStartTime;
+    private long realStartTime = 0;
+    private int curFrameIndex = 0;
+    private int lastFrameIndex = -1;
+    private int numFramesSkipped = 0;
+    private int numFramesDelayed = 0;
+    private final File recordFolder = new File("/sdcard/traces/TOGGLE-Q-0");
+    private final String recordFile = "TOGGLE.txt";
+    private ArrayList<Long> frameTimeArr = new ArrayList<>();
+    private ArrayList<Integer> frameSendResultArr = new ArrayList<>();
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -150,15 +163,19 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
 
+            // TODO: Make member variables atomic if using more than 1 Gabriel Tokens
             if (step.equals(WCA_FSM_START)) {
-                logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
-                inputFrameCount = 1;
+                realStartTime = SystemClock.uptimeMillis();
+                logList.add(TAG + ": Start: " + realStartTime + "\n");
                 Log.i(TAG, "Profiling started.");
             }
             step = toClientExtras.getStep();
-            if (step.equals(WCA_FSM_END)) {
+            if (step.equals(WCA_FSM_END) && !logCompleted) {
+                logCompleted = true;
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
+                logList.add(TAG + ": Number of frames skipped: " + numFramesSkipped + "\n");
+                logList.add(TAG + ": Number of frames delayed: " + numFramesDelayed + "\n");
                 writeLog();
                 Log.i(TAG, "Profiling completed.");
             }
@@ -230,6 +247,27 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
+                startActivity(intent);
+            }
+        }
+
+//        // Permissions for ODG, Magicleap, and Google Glass
+//        String[] permissions = new String[] {
+//                Manifest.permission.INTERNET, Manifest.permission.READ_EXTERNAL_STORAGE,
+//                Manifest.permission.WRITE_EXTERNAL_STORAGE};
+//        for (String permission : permissions) {
+//            if (ContextCompat.checkSelfPermission(this, permission) !=
+//                    PackageManager.PERMISSION_GRANTED) {
+//                requestPermissions(permissions, 0);
+//                break;
+//            }
+//        }
+
         videoFile = new File(this.getCacheDir(), VIDEO_NAME);
         PreviewView viewFinder = findViewById(R.id.viewFinder);
 
@@ -254,6 +292,23 @@ public class MainActivity extends AppCompatActivity {
         try {
             logFileWriter = new FileWriter(logFile, true);
         } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        try {
+            Scanner sc = new Scanner(new File(recordFolder, recordFile));
+            if (sc.hasNextLine()) {
+                syncStartTime = Long.parseLong(sc.nextLine().split(": ")[2]);
+                Log.w(TAG, "Syncing start time: " + syncStartTime);
+            }
+            while (sc.hasNextLine()) {
+                String[] frameRec = sc.nextLine().split(",");
+                if (frameRec.length == 4) {
+                    frameTimeArr.add(Long.parseLong(frameRec[0]));
+                    frameSendResultArr.add(Integer.parseInt(frameRec[3]));
+                }
+            }
+        } catch (FileNotFoundException e) {
             e.printStackTrace();
         }
 
@@ -284,8 +339,10 @@ public class MainActivity extends AppCompatActivity {
         serverComm = ServerComm.createServerComm(
                 consumer, BuildConfig.GABRIEL_HOST, PORT, getApplication(), onDisconnect);
 
-        TextToSpeech.OnInitListener onInitListener = i -> {
-            textToSpeech.setLanguage(Locale.US);
+        TextToSpeech.OnInitListener onInitListener = status -> {
+            if (status == TextToSpeech.ERROR) {
+                Log.e(TAG, "TextToSpeech initialization failed with status " + status);
+            }
 
             ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep(step).build();
             InputFrame inputFrame = InputFrame.newBuilder()
@@ -296,9 +353,8 @@ public class MainActivity extends AppCompatActivity {
             // instruction.
             serverComm.send(inputFrame, SOURCE, /* wait */ true);
         };
-        this.textToSpeech = new TextToSpeech(this, onInitListener);
+        this.textToSpeech = new TextToSpeech(getApplicationContext(), onInitListener);
 
-        yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
         cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
     }
 
@@ -338,35 +394,101 @@ public class MainActivity extends AppCompatActivity {
     final private ImageAnalysis.Analyzer analyzer = new ImageAnalysis.Analyzer() {
         @Override
         public void analyze(@NonNull ImageProxy image) {
+            image.close();
+
             boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
             if (step.equals(WCA_FSM_END) && !toWait) {
-                image.close();
                 return;
             }
+
+            if (realStartTime == 0) {
+                return;
+            }
+
+            // Get most concurrent frame from the recorded trace
+            // Always try to wait and use the next frame if possible
+            long timeDiff;
+            if (lastFrameIndex + 1 < frameTimeArr.size()) {
+                curFrameIndex = lastFrameIndex + 1;
+            }
+            while (curFrameIndex + 1 < frameTimeArr.size()) {
+                // Never skip a frame that should be sent to the server
+                // Note that the last frame in the recorded trace will never be skipped and might be reused
+                if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
+                    break;
+                }
+
+                timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex + 1);
+                // If it runs slower than the recorded trace, skip frames when necessary
+                if (timeDiff > 0) {
+                    curFrameIndex++;
+                } else {
+                    break;
+                }
+            }
+
+            // Do not reuse frames even if it runs faster than the recorded trace
+            if (curFrameIndex == lastFrameIndex) {
+                if (curFrameIndex + 1 == frameTimeArr.size()) {
+                    return;
+                }
+                // Pause for the next frame
+                timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex + 1);
+                if (timeDiff < 0) {
+                    try {
+                        Thread.sleep(-timeDiff);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+                return;
+            }
+
             inputFrameCount++;
-            if (!sendFramesSwitch.isChecked()) {
-                image.close();
-                return;
+//            Log.w(TAG, "inputCount / Cur / Last / NumSkipped / ShouldSend? = " + inputFrameCount +
+//                    " / " + curFrameIndex + " / " + lastFrameIndex + " / " + numFramesSkipped +
+//                    " / " + frameSendResultArr.get(curFrameIndex));
+            numFramesSkipped += Integer.max(curFrameIndex - lastFrameIndex - 1, 0);
+            lastFrameIndex = curFrameIndex;
+
+            // If it runs faster, pause until the timestamp of the chosen frame matches that from the recorded trace
+            timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex);
+            if (timeDiff < 0) {
+                numFramesDelayed++;
+                try {
+                    Thread.sleep(-timeDiff);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
             }
-            ToServerExtras.ClientCmd clientCmd = prepCommand;
-            prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-            serverComm.sendSupplier(() -> {
-                ByteString jpegByteString = yuvToJPEGConverter.convert(image);
 
-                ToServerExtras toServerExtras = ToServerExtras.newBuilder()
-                        .setStep(MainActivity.this.step)
-                        .setClientCmd(clientCmd)
-                        .build();
+            File jpegFrame = new File(recordFolder, "TOGGLE-" + frameTimeArr.get(curFrameIndex) + ".jpg");
+            try {
+                byte[] jpegBytes = Files.readAllBytes(jpegFrame.toPath());
 
-                return InputFrame.newBuilder()
-                        .setPayloadType(PayloadType.IMAGE)
-                        .addPayloads(jpegByteString)
-                        .setExtras(pack(toServerExtras))
-                        .build();
-            }, SOURCE, /* wait */ toWait);
+                // For determinism, ensure that the same frames are sent to the server
+                if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
+                    ToServerExtras.ClientCmd clientCmd = prepCommand;
+                    prepCommand = ToServerExtras.ClientCmd.NO_CMD;
+                    serverComm.sendSupplier(() -> {
+                        ByteString jpegByteString = ByteString.copyFrom(jpegBytes);
 
-            // The image has either been sent or skipped. It is therefore safe to close the image.
-            image.close();
+                        ToServerExtras toServerExtras = ToServerExtras.newBuilder()
+                                .setStep(MainActivity.this.step)
+                                .setClientCmd(clientCmd)
+                                .build();
+
+                        return InputFrame.newBuilder()
+                                .setPayloadType(PayloadType.IMAGE)
+                                .addPayloads(jpegByteString)
+                                .setExtras(pack(toServerExtras))
+                                .build();
+                    }, SOURCE, true);
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
         }
     };
 
@@ -375,39 +497,5 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
         cameraCapture.shutdown();
         // TODO: Clean up the Zoom session?
-    }
-
-    public void startVoiceRecognition(View view) {
-        final Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        startActivityForResult(intent, REQUEST_CODE);
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-
-        if (resultCode == RESULT_OK) {
-            final List<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-            Log.d(TAG, "ASR results: " + results.toString());
-            if (results.size() > 0 && !results.get(0).isEmpty()) {
-                String spokenText = results.get(0);
-                // TODO: Use more keywords for starting Zoom or sending error report
-                if (spokenText.toUpperCase().contains(CALL_EXPERT)) {
-                    this.textToSpeech.speak("Calling expert now.",
-                            TextToSpeech.QUEUE_FLUSH, null, null);
-                    this.reqCommand = ToServerExtras.ClientCmd.ZOOM_START;
-                } else if (spokenText.toUpperCase().contains(REPORT)) {
-                    this.reqCommand = ToServerExtras.ClientCmd.REPORT;
-                    // TODO: Send error report
-                    //  Let the server return this feedback message audio
-                    final String feedback = "An error log has been recorded. We appreciate your feedback.";
-                    this.textToSpeech.speak(feedback, TextToSpeech.QUEUE_FLUSH, null, null);
-                }
-            }
-        } else {
-            Log.d(TAG, "ASR Result not OK");
-        }
     }
 }
