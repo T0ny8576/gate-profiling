@@ -128,8 +128,8 @@ public class MainActivity extends AppCompatActivity {
     private int lastFrameIndex = -1;
     private int numFramesSkipped = 0;
     private int numFramesDelayed = 0;
-    private final File recordFolder = new File("/sdcard/traces/2023-02-27-11-58-14-EST");
-    private final String recordFile = "NO-GATING-2023-02-27-11-58-14-EST.txt";
+    private final File recordFolder = new File("/sdcard/traces/NO-GATING-Q-0");
+    private final String recordFile = "NO-GATING.txt";
     private ArrayList<Long> frameTimeArr = new ArrayList<>();
     private ArrayList<Integer> frameSendResultArr = new ArrayList<>();
 
