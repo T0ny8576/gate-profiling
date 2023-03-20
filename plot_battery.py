@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+import statistics
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FOLDER = os.path.join(PROJECT_DIR, "logs")
@@ -52,8 +53,11 @@ def draw(log_file, output_file, label):
 
         assert all(battery_level[i] >= battery_level[i + 1] for i in range(len(battery_level) - 1))
         assert all(scale == battery_scale[0] for scale in battery_scale)
-        print("{}: Battery level: {}/{} -> {}/{}".format(label, battery_level[0], battery_scale[0],
-                                                         battery_level[-1], battery_scale[0]))
+        battery_percent_dropped = (battery_level[0] - battery_level[-1]) * 100 / battery_scale[0]
+        print("{}: Battery level: {}%: {}/{} -> {}/{}".format(label,
+                                                              battery_percent_dropped,
+                                                              battery_level[0], battery_scale[0],
+                                                              battery_level[-1], battery_scale[0]))
 
         voltage_y = np.asarray(voltage_y) / 1000.
         # Compensate for different Battery Manager implementation
@@ -84,7 +88,7 @@ def draw(log_file, output_file, label):
         plt.show()
         fig.savefig(output_path, format='jpeg', dpi=100, bbox_inches='tight')
 
-        return label, current_t, power_y, total_time, total_images, unique_images
+        return label, current_t, power_y, total_time, total_images, unique_images, battery_percent_dropped
 
 
 def compare_power(profiles, output_file):
@@ -94,6 +98,8 @@ def compare_power(profiles, output_file):
     ax.set_ylabel("power /W", fontsize=12)
     ax.set_ylim((0, 4))
 
+    profile_records = []
+    profile_data = []
     for prof in profiles:
         print(prof[0] + ":")
         ax.plot(prof[1], prof[2], marker=".", label=prof[0])
@@ -101,17 +107,37 @@ def compare_power(profiles, output_file):
         if prof[5] is not None:
             print("Unique images: {}".format(prof[5]))
             print("Removal rate: {:.2%}".format(1. - prof[5] / prof[4]))
-        print("Total time (s): {}".format(prof[3] / 1000.))
-        print("Total Input Frame: {}".format(prof[4]))
-        print("Input FPS: {}".format(prof[4] * 1000. / prof[3]))
 
+        total_time = prof[3] / 1000.
+        total_frame = prof[4]
+        proc_fps = prof[4] * 1000. / prof[3]
         average_power = np.sum(prof[2]) / len(prof[2])
-        print("Average power (W): {}".format(average_power))
+        battery_percent_dropped = prof[6]
         total_energy = average_power * prof[3] / 1000.
-        print("Total energy (J): {}".format(total_energy))
         energy_per_frame = total_energy / prof[4]
+        print("Total time (s): {}".format(total_time))
+        print("Total Input Frame: {}".format(total_frame))
+        print("Processing FPS: {}".format(proc_fps))
+        print("Average power (W): {}".format(average_power))
+        print("Battery level dropped: {}%".format(battery_percent_dropped))
+        print("Total energy (J): {}".format(total_energy))
         print("Energy per frame (J): {}".format(energy_per_frame))
+        profile_record = [total_time, total_frame, proc_fps, 0, 0, 0, battery_percent_dropped, total_energy]
+        print((total_time, total_frame, proc_fps, 0, 0,
+               "{} [{}, {}]".format(statistics.mean(prof[2]), len(prof[2]), statistics.stdev(prof[2])),
+               battery_percent_dropped, total_energy))
+        profile_records.append(profile_record)
+        profile_data += prof[2]
         print()
+
+    agg_record_mean = np.array(profile_records).mean(axis=0)
+    agg_record_stddev = np.array(profile_records).std(axis=0)
+    print("Agg: ")
+    for i in [0, 1, 2]:
+        print("{:.2f}({:.2f})".format(agg_record_mean[i], agg_record_stddev[i]))
+    print("{:.2f}({:.2f})".format(statistics.mean(profile_data), statistics.stdev(profile_data)))
+    for i in [-2, -1]:
+        print("{:.2f}({:.2f})".format(agg_record_mean[i], agg_record_stddev[i]))
 
     plt.title("Power Comparison")
     plt.legend()
@@ -120,14 +146,9 @@ def compare_power(profiles, output_file):
 
 
 if __name__ == "__main__":
-    prof_1 = draw("vuzix_playback_glass_thumbsup.txt", "vuzix_playback_glass_thumbsup.jpg",
-                  "Vuzix - On-device Thumbs-up Detection")
-    prof_2 = draw("vuzix_playback_cloudlet_thumbsup.txt", "vuzix_playback_cloudlet_thumbsup.jpg",
-                  "Vuzix - Cloudlet Thumbs-up Detection")
-    prof_3 = draw("gg_playback_glass_thumbsup.txt", "gg_playback_glass_thumbsup.jpg",
-                  "Google Glass - On-device Thumbs-up Detection")
-    prof_4 = draw("gg_playback_cloudlet_thumbsup.txt", "gg_playback_cloudlet_thumbsup.jpg",
-                  "Google Glass - Cloudlet Thumbs-up Detection")
-    prof_list = [prof_1, prof_2, prof_3, prof_4]
+    prof_1 = draw("vuzix_ng_q00.txt", "vuzix_ng_q00.jpg", "vuzix_ng_q00")
+    prof_2 = draw("vuzix_ng_q01.txt", "vuzix_ng_q01.jpg", "vuzix_ng_q01")
+    prof_3 = draw("vuzix_ng_q02.txt", "vuzix_ng_q02.jpg", "vuzix_ng_q02")
+    prof_list = [prof_1, prof_2, prof_3]
     print()
     compare_power(prof_list, "power_comparison.jpg")
