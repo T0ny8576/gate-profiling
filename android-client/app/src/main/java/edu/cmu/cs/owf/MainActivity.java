@@ -85,7 +85,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String WCA_FSM_END = "WCA_FSM_END";
     private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-
+    private boolean readyToCount = false;
     private String step = WCA_FSM_START;
 
     private ServerComm serverComm;
@@ -310,7 +310,7 @@ public class MainActivity extends AppCompatActivity {
                 consumer, BuildConfig.GABRIEL_HOST, PORT, getApplication(), onDisconnect);
 
         TextToSpeech.OnInitListener onInitListener = i -> {
-            textToSpeech.setLanguage(Locale.US);
+            readyToCount = true;
         };
         this.textToSpeech = new TextToSpeech(this, onInitListener);
 
@@ -354,9 +354,10 @@ public class MainActivity extends AppCompatActivity {
     final private ImageAnalysis.Analyzer analyzer = new ImageAnalysis.Analyzer() {
         @Override
         public void analyze(@NonNull ImageProxy image) {
+            image.close();
+
             boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
-            if (step.equals(WCA_FSM_END) && !toWait) {
-                image.close();
+            if ((!readyToCount || step.equals(WCA_FSM_END)) && !toWait) {
                 return;
             }
             inputFrameCount++;
@@ -370,27 +371,6 @@ public class MainActivity extends AppCompatActivity {
                 writeLog();
                 Log.i(TAG, "Profiling completed.");
             }
-            if (toWait) {
-                ToServerExtras.ClientCmd clientCmd = prepCommand;
-                prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-                serverComm.sendSupplier(() -> {
-                    ByteString jpegByteString = yuvToJPEGConverter.convert(image);
-
-                    ToServerExtras toServerExtras = ToServerExtras.newBuilder()
-                            .setStep(MainActivity.this.step)
-                            .setClientCmd(clientCmd)
-                            .build();
-
-                    return InputFrame.newBuilder()
-                            .setPayloadType(PayloadType.IMAGE)
-                            .addPayloads(jpegByteString)
-                            .setExtras(pack(toServerExtras))
-                            .build();
-                }, SOURCE, /* wait */ true);
-            }
-
-            // The image has either been sent or skipped. It is therefore safe to close the image.
-            image.close();
         }
     };
 
@@ -399,39 +379,5 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
         cameraCapture.shutdown();
         // TODO: Clean up the Zoom session?
-    }
-
-    public void startVoiceRecognition(View view) {
-        final Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        startActivityForResult(intent, REQUEST_CODE);
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-
-        if (resultCode == RESULT_OK) {
-            final List<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-            Log.d(TAG, "ASR results: " + results.toString());
-            if (results.size() > 0 && !results.get(0).isEmpty()) {
-                String spokenText = results.get(0);
-                // TODO: Use more keywords for starting Zoom or sending error report
-                if (spokenText.toUpperCase().contains(CALL_EXPERT)) {
-                    this.textToSpeech.speak("Calling expert now.",
-                            TextToSpeech.QUEUE_FLUSH, null, null);
-                    this.reqCommand = ToServerExtras.ClientCmd.ZOOM_START;
-                } else if (spokenText.toUpperCase().contains(REPORT)) {
-                    this.reqCommand = ToServerExtras.ClientCmd.REPORT;
-                    // TODO: Send error report
-                    //  Let the server return this feedback message audio
-                    final String feedback = "An error log has been recorded. We appreciate your feedback.";
-                    this.textToSpeech.speak(feedback, TextToSpeech.QUEUE_FLUSH, null, null);
-                }
-            }
-        } else {
-            Log.d(TAG, "ASR Result not OK");
-        }
     }
 }
