@@ -75,6 +75,10 @@ public class MainActivity extends AppCompatActivity {
     private static final String VIDEO_NAME = "video";
     private static final String SOURCE = "owf_client";
     private static final int PORT = 9099;
+
+    private static final int WIDTH = 1920;
+    private static final int HEIGHT = 1080;
+
     public static final String EXTRA_APP_KEY = "edu.cmu.cs.owf.APP_KEY";
     public static final String EXTRA_APP_SECRET = "edu.cmu.cs.owf.APP_SECRET";
     public static final String EXTRA_MEETING_NUMBER = "edu.cmu.cs.owf.MEETING_NUMBER";
@@ -86,6 +90,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean logCompleted = false;
     private String step = WCA_FSM_START;
     private ServerComm serverComm;
+    private ML2CameraCapture cameraCapture;
     private TextToSpeech textToSpeech;
     private ImageViewUpdater instructionViewUpdater;
     private ImageView instructionImage;
@@ -116,8 +121,8 @@ public class MainActivity extends AppCompatActivity {
     private int lastFrameIndex = -1;
     private int numFramesSkipped = 0;
     private int numFramesDelayed = 0;
-    private final File recordFolder = new File("/sdcard/traces/2023-02-10-18-21-18-GMT");
-    private final String recordFile = "THUMBSUP-2023-02-10-18-21-18-GMT.txt";
+    private final File recordFolder = new File("/sdcard/traces/THUMBSUP-Q-0");
+    private final String recordFile = "THUMBSUP.txt";
     private ArrayList<Long> frameTimeArr = new ArrayList<>();
     private ArrayList<Integer> frameSendResultArr = new ArrayList<>();
     private ExecutorService pool;
@@ -168,12 +173,7 @@ public class MainActivity extends AppCompatActivity {
                 realStartTime = SystemClock.uptimeMillis();
                 logList.add(TAG + ": Start: " + realStartTime + "\n");
                 Log.i(TAG, "Profiling started.");
-
-                pool.execute(() -> {
-                    while (curFrameIndex + 1 < frameTimeArr.size()) {
-                        analyzeImage();
-                    }
-                });
+                processCameraFrame();
             }
             step = toClientExtras.getStep();
             if (step.equals(WCA_FSM_END) && !logCompleted) {
@@ -317,8 +317,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void initActivity() {
         videoFile = new File(this.getCacheDir(), VIDEO_NAME);
+        ImageView viewFinder = findViewById(R.id.viewFinder);
         readyView = findViewById(R.id.readyView);
         readyTextView = findViewById(R.id.readyTextView);
+
         AssetManager assetManager = getAssets();
         try
         {
@@ -386,9 +388,11 @@ public class MainActivity extends AppCompatActivity {
         registerReceiver(batteryReceiver, intentFilter);
 
         mBatteryManager = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
-        pool = Executors.newFixedThreadPool(1);
+        pool = Executors.newFixedThreadPool(2);
         timer = new Timer();
         timer.scheduleAtFixedRate(new LogTimerTask(), 0, TIMER_PERIOD);
+
+        cameraCapture = new ML2CameraCapture(WIDTH, HEIGHT, viewFinder);
 
         Consumer<ErrorType> onDisconnect = errorType -> {
             Log.e(TAG, "Disconnect Error: " + errorType.name());
@@ -462,6 +466,23 @@ public class MainActivity extends AppCompatActivity {
                 .build();
     }
 
+    private void processCameraFrame() {
+        pool.execute(() -> {
+            // Camera preview loop
+            while (true) {
+                Bitmap rgbaBitmap = cameraCapture.updateImagePreview();
+                if (rgbaBitmap == null) {
+                    continue;
+                }
+            }
+        });
+        pool.execute(() -> {
+            while (curFrameIndex + 1 < frameTimeArr.size()) {
+                analyzeImage();
+            }
+        });
+    }
+
     private void analyzeImage() {
         boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
         if (step.equals(WCA_FSM_END) && !toWait) {
@@ -481,7 +502,6 @@ public class MainActivity extends AppCompatActivity {
         }
         while (curFrameIndex + 1 < frameTimeArr.size()) {
             // Never skip or consume locally a frame that should be sent to the server
-            // Note that the last frame in the recorded trace will never be skipped and might be reused
             if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
                 if (!readyToSend) {
                     curFrameIndex = Integer.max(curFrameIndex - 1, lastFrameIndex);
@@ -574,9 +594,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        cameraCapture.shutdown();
         // TODO: Clean up the Zoom session?
-    }
-
-    public void startVoiceRecognition(View view) {
     }
 }
