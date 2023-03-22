@@ -5,6 +5,7 @@ import logging
 import io
 import os
 import shutil
+import time
 from datetime import datetime
 from collections import namedtuple
 from multiprocessing import Process, Pipe
@@ -220,6 +221,9 @@ class InferenceEngine(cognitive_engine.Engine):
 
     def __init__(self, fsm_file_path):
         self._frame_tx_count = 0
+        self._tx_size_bytes = 0
+        self._od_processing_time = []
+        self._two_stage_processing_time = []
         # ############################################ Temp fix
         # TODO: Add them in the protobuf message to make the server stateless
         self.count_ = 0
@@ -264,7 +268,7 @@ class InferenceEngine(cognitive_engine.Engine):
                 os.remove(DEFAULT_CACHE_DIR)
         os.makedirs(DEFAULT_CACHE_DIR, exist_ok=True)
 
-    def _result_wrapper_for_transition(self, transition):
+    def _result_wrapper_for_transition(self, transition, client_time=0):
         status = gabriel_pb2.ResultWrapper.Status.SUCCESS
         result_wrapper = cognitive_engine.create_result_wrapper(status)
 
@@ -290,13 +294,17 @@ class InferenceEngine(cognitive_engine.Engine):
         to_client_extras = owf_pb2.ToClientExtras()
         to_client_extras.step = transition.next_state
         to_client_extras.zoom_result = owf_pb2.ToClientExtras.ZoomResult.NO_CALL
+        to_client_extras.frame_stamp = client_time
 
         assert transition.next_state != '', "invalid transition end state"
         to_client_extras.user_ready = owf_pb2.ToClientExtras.UserReady.DISABLE
         next_processors = self._states_models.get_state(transition.next_state).processors
         if len(next_processors) == 0:
             # End state reached
-            logger.info("Client done. # Frame transmitted = %s", self._frame_tx_count)
+            logger.info("Client done. # Frame transmitted = %s, transmitted bytes = %s",
+                        self._frame_tx_count, self._tx_size_bytes)
+            logger.info("Object Detector Processing Time: %s\nTwo Stage Processing Time: %s",
+                        self._od_processing_time, self._two_stage_processing_time)
             to_client_extras.step = "WCA_FSM_END"
 
         result_wrapper.extras.Pack(to_client_extras)
@@ -306,13 +314,15 @@ class InferenceEngine(cognitive_engine.Engine):
                             step,
                             zoom_result=owf_pb2.ToClientExtras.ZoomResult.NO_CALL,
                             audio=None,
-                            user_ready=owf_pb2.ToClientExtras.UserReady.NO_CHANGE):
+                            user_ready=owf_pb2.ToClientExtras.UserReady.NO_CHANGE,
+                            client_time=0):
         status = gabriel_pb2.ResultWrapper.Status.SUCCESS
         result_wrapper = cognitive_engine.create_result_wrapper(status)
         to_client_extras = owf_pb2.ToClientExtras()
         to_client_extras.step = step
         to_client_extras.zoom_result = zoom_result
         to_client_extras.user_ready = user_ready
+        to_client_extras.frame_stamp = client_time
 
         if audio is not None:
             result = gabriel_pb2.ResultWrapper.Result()
@@ -376,10 +386,15 @@ class InferenceEngine(cognitive_engine.Engine):
             # ###############################################
             return self._result_wrapper_for_transition(transition)
 
+        input_frame_time = to_server_extras.frame_stamp
+        processing_start = round(time.time() * 1000)
         step = to_server_extras.step
         if step == "WCA_FSM_START" or not step:
             state = self._states_models.get_start_state()
-            self._frame_tx_count = 0
+            self._frame_tx_count = -1
+            self._tx_size_bytes = 0
+            self._od_processing_time = []
+            self._two_stage_processing_time = []
         elif step == "WCA_FSM_END":
             return self._result_wrapper_for(step,
                                             user_ready=owf_pb2.ToClientExtras.UserReady.DISABLE)
@@ -391,13 +406,13 @@ class InferenceEngine(cognitive_engine.Engine):
 
         self._frame_tx_count += 1
 
-        # Save current cache folder and create a new cache folder
-        if (to_server_extras.client_cmd ==
-                owf_pb2.ToServerExtras.ClientCmd.REPORT):
-            report_time = datetime.now().strftime('-%Y-%m-%d-%H-%M-%S-%f')
-            log_dirname = self._fsm_file_name.split('.')[0] + report_time
-            os.rename(DEFAULT_CACHE_DIR, os.path.join(CACHE_BASEDIR, log_dirname))
-            os.makedirs(DEFAULT_CACHE_DIR, exist_ok=True)
+#         # Save current cache folder and create a new cache folder
+#         if (to_server_extras.client_cmd ==
+#                 owf_pb2.ToServerExtras.ClientCmd.REPORT):
+#             report_time = datetime.now().strftime('-%Y-%m-%d-%H-%M-%S-%f')
+#             log_dirname = self._fsm_file_name.split('.')[0] + report_time
+#             os.rename(DEFAULT_CACHE_DIR, os.path.join(CACHE_BASEDIR, log_dirname))
+#             os.makedirs(DEFAULT_CACHE_DIR, exist_ok=True)
 
         if state.always_transition is not None:
             # ###############################################
@@ -414,6 +429,7 @@ class InferenceEngine(cognitive_engine.Engine):
 
         if not input_frame.payloads:
             return self._result_wrapper_for(step)
+        self._tx_size_bytes += len(input_frame.payloads[0])
         np_data = np.frombuffer(input_frame.payloads[0], dtype=np.uint8)
         img_bgr = cv2.imdecode(np_data, cv2.IMREAD_COLOR)
         img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -451,22 +467,24 @@ class InferenceEngine(cognitive_engine.Engine):
                 good_boxes.insert(bi, box)
                 box_scores.insert(bi, score)
 
-        # Cache the current frame
-        if len(self._frames_cached) >= MAX_FRAMES_CACHED:
-            frame_to_evict = self._frames_cached.pop(0)
-            try:
-                os.remove(frame_to_evict)
-            except OSError as oe:
-                logger.warning(oe)
-        cur_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f-')
-        detected_class = detector_class_name if good_boxes else 'none'
-        cached_filename = os.path.join(DEFAULT_CACHE_DIR,
-                                       cur_time + detected_class + '(' + detector_class_name + ').jpg')
-        self._frames_cached.append(cached_filename)
-        cv2.imwrite(cached_filename, img_bgr)
+#         # Cache the current frame
+#         if len(self._frames_cached) >= MAX_FRAMES_CACHED:
+#             frame_to_evict = self._frames_cached.pop(0)
+#             try:
+#                 os.remove(frame_to_evict)
+#             except OSError as oe:
+#                 logger.warning(oe)
+#         cur_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f-')
+#         detected_class = detector_class_name if good_boxes else 'none'
+#         cached_filename = os.path.join(DEFAULT_CACHE_DIR,
+#                                        cur_time + detected_class + '(' + detector_class_name + ').jpg')
+#         self._frames_cached.append(cached_filename)
+#         cv2.imwrite(cached_filename, img_bgr)
 
+        od_proc_time = round(time.time() * 1000) - processing_start
+        self._od_processing_time.append(od_proc_time)
         if not good_boxes:
-            return self._result_wrapper_for(step)
+            return self._result_wrapper_for(step, client_time=input_frame_time)
 
         print()
         print('Detector boxes:', box_scores)
@@ -534,31 +552,34 @@ class InferenceEngine(cognitive_engine.Engine):
                 class_ind = pred.item()
                 label_name = classifier.labels[class_ind]
 
-                # Cache the cropped frame
-                if len(self._frames_cached) >= MAX_FRAMES_CACHED:
-                    frame_to_evict = self._frames_cached.pop(0)
-                    try:
-                        os.remove(frame_to_evict)
-                    except OSError as oe:
-                        logger.warning(oe)
-                classified_class = label_name
-                cached_filename = os.path.join(DEFAULT_CACHE_DIR,
-                                               cur_time + "cropped-" + classified_class + '.jpg')
-                self._frames_cached.append(cached_filename)
-                cropped_pil.save(cached_filename)
+#                 # Cache the cropped frame
+#                 if len(self._frames_cached) >= MAX_FRAMES_CACHED:
+#                     frame_to_evict = self._frames_cached.pop(0)
+#                     try:
+#                         os.remove(frame_to_evict)
+#                     except OSError as oe:
+#                         logger.warning(oe)
+#                 classified_class = label_name
+#                 cached_filename = os.path.join(DEFAULT_CACHE_DIR,
+#                                                cur_time + "cropped-" + classified_class + '.jpg')
+#                 self._frames_cached.append(cached_filename)
+#                 cropped_pil.save(cached_filename)
 
             logger.info('Found label: %s', label_name)
             # logger.info('return transition: %s', str(state.has_class_transitions.keys()))
             # logger.info('current state name on server is: %s', step)
 
+            two_stage_proc_time = round(time.time() * 1000) - processing_start
+            self._two_stage_processing_time.append(two_stage_proc_time)
             if label_name is not None:
                 transition = state.has_class_transitions.get(label_name)
                 if transition is not None:
                     # ###############################################
                     self._thumbs_up_found = False
                     # ###############################################
-                    return self._result_wrapper_for_transition(transition)
-            return self._result_wrapper_for(step)
+                    return self._result_wrapper_for_transition(transition,
+                                                               client_time=input_frame_time)
+            return self._result_wrapper_for(step, client_time=input_frame_time)
 
         # Good boxes do not contain any valid steps
         self.count_ = 0
