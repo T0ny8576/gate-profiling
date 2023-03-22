@@ -51,6 +51,7 @@ import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
 import edu.cmu.cs.gabriel.camera.YuvToJPEGConverter;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
+import edu.cmu.cs.gabriel.client.results.SendSupplierResult;
 import edu.cmu.cs.gabriel.protocol.Protos.InputFrame;
 import edu.cmu.cs.gabriel.protocol.Protos.ResultWrapper;
 import edu.cmu.cs.gabriel.protocol.Protos.PayloadType;
@@ -114,6 +115,12 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     private static final String KWS_SEARCH = "keyword";
     private static final String KEYPHRASE = "ready for detection";
     private SpeechRecognizer recognizer;
+    private long lastSpeechStartTime = 0;
+
+    private final ConcurrentLinkedDeque<Long> asrLocalTime = new ConcurrentLinkedDeque<>();
+    private final ConcurrentLinkedDeque<Long> frameDroppedLocalTime = new ConcurrentLinkedDeque<>();
+    private final ConcurrentLinkedDeque<Long> frameSentLocalTime = new ConcurrentLinkedDeque<>();
+    private final ConcurrentLinkedDeque<Long> frameSentRTT = new ConcurrentLinkedDeque<>();
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -154,6 +161,11 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                             .create();
                     alertDialog.show();
                 });
+            }
+
+            long frameTimeStamp = toClientExtras.getFrameStamp();
+            if (frameTimeStamp != 0) {
+                frameSentRTT.add(SystemClock.uptimeMillis() - frameTimeStamp);
             }
 
             // TODO: Make member variables atomic if using more than 1 Gabriel Tokens
@@ -363,6 +375,25 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         timer.cancel();
         timer.purge();
         unregisterReceiver(batteryReceiver);
+
+        logList.add("\nasrLocalTime:\n");
+        for (Long timeDiff: asrLocalTime) {
+            logList.add(timeDiff + ",");
+        }
+        logList.add("\nframeDroppedLocalTime:\n");
+        for (Long timeDiff: frameDroppedLocalTime) {
+            logList.add(timeDiff + ",");
+        }
+        logList.add("\nframeSentLocalTime:\n");
+        for (Long timeDiff: frameSentLocalTime) {
+            logList.add(timeDiff + ",");
+        }
+        logList.add("\nframeSentRTT:\n");
+        for (Long timeDiff: frameSentRTT) {
+            logList.add(timeDiff + ",");
+        }
+        logList.add("\n");
+
         try {
             for (String logString: logList) {
                 logFileWriter.write(logString);
@@ -391,15 +422,19 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                 return;
             }
             inputFrameCount++;
+            long jpegTime = SystemClock.uptimeMillis();
             if (readyForServer) {
                 ToServerExtras.ClientCmd clientCmd = prepCommand;
                 prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-                serverComm.sendSupplier(() -> {
+                SendSupplierResult sendResult = serverComm.sendSupplier(() -> {
                     ByteString jpegByteString = yuvToJPEGConverter.convert(image);
 
+                    long timeBeforeSending = SystemClock.uptimeMillis();
+                    frameSentLocalTime.add(timeBeforeSending - jpegTime);
                     ToServerExtras toServerExtras = ToServerExtras.newBuilder()
                             .setStep(MainActivity.this.step)
                             .setClientCmd(clientCmd)
+                            .setFrameStamp(timeBeforeSending)
                             .build();
 
                     return InputFrame.newBuilder()
@@ -408,6 +443,11 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                             .setExtras(pack(toServerExtras))
                             .build();
                 }, SOURCE, /* wait */ toWait);
+                if (sendResult != SendSupplierResult.SUCCESS) {
+                    frameDroppedLocalTime.add(SystemClock.uptimeMillis() - jpegTime);
+                }
+            } else {
+                frameDroppedLocalTime.add(SystemClock.uptimeMillis() - jpegTime);
             }
             // The image has either been sent or skipped. It is therefore safe to close the image.
             image.close();
@@ -427,6 +467,8 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
     @Override
     public void onBeginningOfSpeech() {
+        lastSpeechStartTime = SystemClock.uptimeMillis();
+        Log.w(TAG, "Update speech start time: " + lastSpeechStartTime);
     }
 
     @Override
@@ -454,6 +496,9 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                 readyView.setVisibility(View.VISIBLE);
                 readyTextView.setVisibility(View.VISIBLE);
             });
+            long asrDuration = SystemClock.uptimeMillis() - lastSpeechStartTime;
+            asrLocalTime.add(asrDuration);
+            Log.w(TAG, "Recording ASR duration: " + lastSpeechStartTime + " then " + asrDuration + " ms");
         } else {
             recognizer.startListening(KWS_SEARCH);
         }
