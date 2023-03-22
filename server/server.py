@@ -220,6 +220,7 @@ class InferenceEngine(cognitive_engine.Engine):
 
     def __init__(self, fsm_file_path):
         self._frame_tx_count = 0
+        self._tx_size_bytes = 0
         # ############################################ Temp fix
         # TODO: Add them in the protobuf message to make the server stateless
         self.count_ = 0
@@ -296,7 +297,7 @@ class InferenceEngine(cognitive_engine.Engine):
         next_processors = self._states_models.get_state(transition.next_state).processors
         if len(next_processors) == 0:
             # End state reached
-            logger.info("Client done. # Frame transmitted = %s", self._frame_tx_count)
+            logger.info("Client done. # Frame transmitted = %s, transmitted bytes = %s", self._frame_tx_count, self._tx_size_bytes)
             to_client_extras.step = "WCA_FSM_END"
 
         result_wrapper.extras.Pack(to_client_extras)
@@ -379,7 +380,8 @@ class InferenceEngine(cognitive_engine.Engine):
         step = to_server_extras.step
         if step == "WCA_FSM_START" or not step:
             state = self._states_models.get_start_state()
-            self._frame_tx_count = 0
+            self._frame_tx_count = -1
+            self._tx_size_bytes = 0
         elif step == "WCA_FSM_END":
             return self._result_wrapper_for(step,
                                             user_ready=owf_pb2.ToClientExtras.UserReady.DISABLE)
@@ -414,6 +416,7 @@ class InferenceEngine(cognitive_engine.Engine):
 
         if not input_frame.payloads:
             return self._result_wrapper_for(step)
+        self._tx_size_bytes += len(input_frame.payloads[0])
         np_data = np.frombuffer(input_frame.payloads[0], dtype=np.uint8)
         img_bgr = cv2.imdecode(np_data, cv2.IMREAD_COLOR)
         img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
