@@ -56,7 +56,8 @@ def draw(log_file, output_file, label):
                                                          battery_level[-1], battery_scale[0]))
 
         voltage_y = np.asarray(voltage_y) / 1000.
-        current_y = np.asarray(current_y) / 1000000.
+        # Compensate for different Battery Manager implementation
+        current_y = np.abs(np.asarray(current_y) / 1000000.)
         voltage_t = np.asarray(voltage_t) / 1000.
         current_t = np.asarray(current_t) / 1000.
 
@@ -66,20 +67,23 @@ def draw(log_file, output_file, label):
         ax.set_ylabel("current /A", color="red", fontsize=12)
         ax.set_ylim((0, 1))
 
+        power_y = []
+        voltage_y2 = []
+        vi = 0
+        for ci, ts in enumerate(current_t):
+            while vi + 1 < len(voltage_t) and voltage_t[vi + 1] <= ts:
+                vi += 1
+            power_y.append(voltage_y[vi] * current_y[ci])
+            voltage_y2.append(voltage_y[vi])
+
         ax2 = ax.twinx()
-        ax2.plot(voltage_t, voltage_y, color="blue", marker=".")
+        ax2.plot(current_t, voltage_y2, color="blue")
         ax2.set_ylabel("voltage /V", color="blue", fontsize=12)
         ax2.set_ylim((0, 5))
         plt.title(label)
         plt.show()
         fig.savefig(output_path, format='jpeg', dpi=100, bbox_inches='tight')
 
-        power_y = []
-        vi = 0
-        for ci, ts in enumerate(current_t):
-            while vi + 1 < len(voltage_t) and voltage_t[vi + 1] <= ts:
-                vi += 1
-            power_y.append(voltage_y[vi] * current_y[ci])
         return label, current_t, power_y, total_time, total_images, unique_images
 
 
@@ -92,20 +96,21 @@ def compare_power(profiles, output_file):
 
     for prof in profiles:
         print(prof[0] + ":")
-        ax.plot(prof[1], prof[2], label=prof[0], linewidth=2)
-        time_per_frame = prof[3] / prof[4]
-        print("Total Input Frame: {}".format(prof[4]))
+        ax.plot(prof[1], prof[2], marker=".", label=prof[0])
+
         if prof[5] is not None:
             print("Unique images: {}".format(prof[5]))
             print("Removal rate: {:.2%}".format(1. - prof[5] / prof[4]))
         print("Total time (s): {}".format(prof[3] / 1000.))
-        print("Time per frame (ms): {:.2f}".format(time_per_frame))
+        print("Total Input Frame: {}".format(prof[4]))
+        print("Input FPS: {}".format(prof[4] * 1000. / prof[3]))
+
         average_power = np.sum(prof[2]) / len(prof[2])
-        print("Average power (W): {:.2f}".format(average_power))
-        energy_per_frame = average_power * time_per_frame / 1000.
-        print("Energy per frame (J): {:.4f}".format(energy_per_frame))
+        print("Average power (W): {}".format(average_power))
         total_energy = average_power * prof[3] / 1000.
-        print("Total energy (J): {:.2f}".format(total_energy))
+        print("Total energy (J): {}".format(total_energy))
+        energy_per_frame = total_energy / prof[4]
+        print("Energy per frame (J): {}".format(energy_per_frame))
         print()
 
     plt.title("Power Comparison")
@@ -115,12 +120,8 @@ def compare_power(profiles, output_file):
 
 
 if __name__ == "__main__":
-    prof_1 = draw("glass_cloudlet_thumbsup.txt", "glass_cloudlet_thumbsup.jpg",
-                  "Google Glass - Cloudlet Thumbs-up Detection")
-    prof_2 = draw("glass_idle.txt", "glass_idle.jpg", "Google Glass - Idle")
-    prof_3 = draw("glass_no_gating.txt", "glass_no_gating.jpg", "Google Glass - No Gating")
-    prof_4 = draw("glass_toggle_switch.txt", "glass_toggle_switch.jpg", "Google Glass - Toggle Switch")
-    prof_5 = draw("glass_thumbsup.txt", "glass_thumbsup.jpg", "Google Glass - On-glass Thumbs-up Detection")
-    prof_6 = draw("glass_asr_gating.txt", "glass_asr_gating.jpg", "Google Glass - On-glass ASR Gating")
-    prof_list = [prof_1, prof_2, prof_3, prof_4, prof_5, prof_6]
+    prof_1 = draw("vuzix_playback_glass_thumbsup.txt", "vuzix_playback_glass_thumbsup.jpg",
+                  "Vuzix - On-device Thumbs-up Detection")
+    prof_list = [prof_1, ]
+    print()
     compare_power(prof_list, "power_comparison.jpg")

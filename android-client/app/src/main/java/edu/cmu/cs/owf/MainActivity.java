@@ -1,22 +1,30 @@
 package edu.cmu.cs.owf;
 
+import static android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION;
+
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 
+import android.Manifest;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
+import android.net.Uri;
 import android.os.BatteryManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.SystemClock;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
@@ -31,13 +39,17 @@ import com.google.protobuf.InvalidProtocolBufferException;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.Locale;
+import java.util.Scanner;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -48,6 +60,7 @@ import java.util.function.Consumer;
 import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
+import edu.cmu.cs.gabriel.client.results.SendSupplierResult;
 import edu.cmu.cs.gabriel.protocol.Protos.InputFrame;
 import edu.cmu.cs.gabriel.protocol.Protos.ResultWrapper;
 import edu.cmu.cs.gabriel.protocol.Protos.PayloadType;
@@ -79,20 +92,20 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     public static final String EXTRA_MEETING_PASSWORD = "edu.cmu.cs.owf.MEETING_PASSWORD";
     private static final String WCA_FSM_START = "WCA_FSM_START";
     private static final String WCA_FSM_END = "WCA_FSM_END";
-    ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
+    private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
     private ToServerExtras.ClientCmd prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-
-    private String step = WCA_FSM_START;
     boolean readyForServer = false;
+    private boolean logCompleted = false;
+    private String step = WCA_FSM_START;
 
     private ServerComm serverComm;
     private ML2CameraCapture cameraCapture;
 
-    TextToSpeech textToSpeech;
+    private TextToSpeech textToSpeech;
     private ImageViewUpdater instructionViewUpdater;
     private ImageView instructionImage;
-    ImageView readyView;
-    TextView readyTextView;
+    private ImageView readyView;
+    private TextView readyTextView;
     private VideoView instructionVideo;
     private File videoFile;
 
@@ -111,6 +124,17 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     private static final String KWS_SEARCH = "keyword";
     private static final String KEYPHRASE = "ready for detection";
     private SpeechRecognizer recognizer;
+
+    private long syncStartTime;
+    private long realStartTime = 0;
+    private int curFrameIndex = 0;
+    private int lastFrameIndex = -1;
+    private int numFramesSkipped = 0;
+    private int numFramesDelayed = 0;
+    private final File recordFolder = new File("/sdcard/traces/ASR-Q-0");
+    private final String recordFile = "ASR.txt";
+    private ArrayList<Long> frameTimeArr = new ArrayList<>();
+    private ArrayList<Integer> frameSendResultArr = new ArrayList<>();
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -153,16 +177,20 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                 });
             }
 
+            // TODO: Make member variables atomic if using more than 1 Gabriel Tokens
             if (step.equals(WCA_FSM_START)) {
-                logList.add(TAG + ": Start: " + SystemClock.uptimeMillis() + "\n");
-                inputFrameCount = 1;
+                realStartTime = SystemClock.uptimeMillis();
+                logList.add(TAG + ": Start: " + realStartTime + "\n");
                 Log.i(TAG, "Profiling started.");
                 processCameraFrame();
             }
             step = toClientExtras.getStep();
-            if (step.equals(WCA_FSM_END)) {
+            if (step.equals(WCA_FSM_END) && !logCompleted) {
+                logCompleted = true;
                 logList.add(TAG + ": Total Input Frames: " + inputFrameCount + "\n");
                 logList.add(TAG + ": Stop: " + SystemClock.uptimeMillis() + "\n");
+                logList.add(TAG + ": Number of frames skipped: " + numFramesSkipped + "\n");
+                logList.add(TAG + ": Number of frames delayed: " + numFramesDelayed + "\n");
                 writeLog();
                 readyForServer = false;
                 recognizer.stop();
@@ -247,6 +275,27 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+//        // Request ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION on Vuzix Blade 2
+//        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+//            if (!Environment.isExternalStorageManager()) {
+//                Intent intent = new Intent(ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+//                        Uri.parse("package:" + BuildConfig.APPLICATION_ID));
+//                startActivity(intent);
+//            }
+//        }
+
+        // Permissions for ODG, Magicleap, and Google Glass
+        String[] permissions = new String[] {
+                Manifest.permission.INTERNET, Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE};
+        for (String permission : permissions) {
+            if (ContextCompat.checkSelfPermission(this, permission) !=
+                    PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(permissions, 0);
+                break;
+            }
+        }
+
         videoFile = new File(this.getCacheDir(), VIDEO_NAME);
         ImageView viewFinder = findViewById(R.id.viewFinder);
 
@@ -286,6 +335,23 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
             e.printStackTrace();
         }
 
+        try {
+            Scanner sc = new Scanner(new File(recordFolder, recordFile));
+            if (sc.hasNextLine()) {
+                syncStartTime = Long.parseLong(sc.nextLine().split(": ")[2]);
+                Log.w(TAG, "Syncing start time: " + syncStartTime);
+            }
+            while (sc.hasNextLine()) {
+                String[] frameRec = sc.nextLine().split(",");
+                if (frameRec.length == 4) {
+                    frameTimeArr.add(Long.parseLong(frameRec[0]));
+                    frameSendResultArr.add(Integer.parseInt(frameRec[3]));
+                }
+            }
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+
         IntentFilter intentFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
         batteryReceiver = new BroadcastReceiver() {
             @Override
@@ -302,9 +368,11 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         registerReceiver(batteryReceiver, intentFilter);
 
         mBatteryManager = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
-
+        pool = Executors.newFixedThreadPool(2);
         timer = new Timer();
         timer.scheduleAtFixedRate(new LogTimerTask(), 0, TIMER_PERIOD);
+
+        cameraCapture = new ML2CameraCapture(WIDTH, HEIGHT, viewFinder);
 
         Consumer<ErrorType> onDisconnect = errorType -> {
             Log.e(TAG, "Disconnect Error: " + errorType.name());
@@ -329,7 +397,10 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
             e.printStackTrace();
         }
 
-        TextToSpeech.OnInitListener onInitListener = i -> {
+        TextToSpeech.OnInitListener onInitListener = status -> {
+            if (status == TextToSpeech.ERROR) {
+                Log.e(TAG, "TextToSpeech initialization failed with status " + status);
+            }
 
             ToServerExtras toServerExtras = ToServerExtras.newBuilder().setStep(step).build();
             InputFrame inputFrame = InputFrame.newBuilder()
@@ -340,48 +411,120 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
             // instruction.
             serverComm.send(inputFrame, SOURCE, /* wait */ true);
         };
-        this.textToSpeech = new TextToSpeech(this, onInitListener);
-
-        cameraCapture = new ML2CameraCapture(WIDTH, HEIGHT, viewFinder);
-        pool = Executors.newFixedThreadPool(1);
+        this.textToSpeech = new TextToSpeech(getApplicationContext(), onInitListener);
     }
 
     private void processCameraFrame() {
-        pool.execute(()-> {
+        pool.execute(() -> {
+            // Camera preview loop
             while (true) {
                 Bitmap rgbaBitmap = cameraCapture.updateImagePreview();
                 if (rgbaBitmap == null) {
                     continue;
                 }
-
-                boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
-                if (step.equals(WCA_FSM_END) && !toWait) {
-                    continue;
-                }
-                inputFrameCount++;
-                if (readyForServer) {
-                    ToServerExtras.ClientCmd clientCmd = prepCommand;
-                    prepCommand = ToServerExtras.ClientCmd.NO_CMD;
-
-                    serverComm.sendSupplier(() -> {
-                        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-                        rgbaBitmap.compress(Bitmap.CompressFormat.JPEG, 100, byteArrayOutputStream);
-                        ByteString imageByteString = ByteString.copyFrom(byteArrayOutputStream.toByteArray());
-
-                        ToServerExtras toServerExtras = ToServerExtras.newBuilder()
-                                .setStep(MainActivity.this.step)
-                                .setClientCmd(clientCmd)
-                                .build();
-
-                        return InputFrame.newBuilder()
-                                .setPayloadType(PayloadType.IMAGE)
-                                .addPayloads(imageByteString)
-                                .setExtras(pack(toServerExtras))
-                                .build();
-                    }, SOURCE, /* wait */ toWait);
-                }
             }
         });
+        pool.execute(() -> {
+            while (curFrameIndex + 1 < frameTimeArr.size()) {
+                analyzeImage();
+            }
+        });
+    }
+
+    private void analyzeImage() {
+        boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
+        if (step.equals(WCA_FSM_END) && !toWait) {
+            return;
+        }
+
+        if (realStartTime == 0) {
+            return;
+        }
+
+        // Get most concurrent frame from the recorded trace
+        // Always try to wait and use the next frame if possible
+        long timeDiff;
+        if (lastFrameIndex + 1 < frameTimeArr.size()) {
+            curFrameIndex = lastFrameIndex + 1;
+        }
+        while (curFrameIndex + 1 < frameTimeArr.size()) {
+            // Never skip a frame that should be sent to the server
+            if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
+                break;
+            }
+
+            timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex + 1);
+            // If it runs slower than the recorded trace, skip frames when necessary
+            if (timeDiff > 0) {
+                curFrameIndex++;
+            } else {
+                break;
+            }
+        }
+
+        // Do not reuse frames even if it runs faster than the recorded trace
+        if (curFrameIndex == lastFrameIndex) {
+            if (curFrameIndex + 1 == frameTimeArr.size()) {
+                // Increase the current index and do not enter this function again
+                curFrameIndex++;
+                return;
+            }
+            // Pause for the next frame
+            timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex + 1);
+            if (timeDiff < 0) {
+                try {
+                    Thread.sleep(-timeDiff);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            return;
+        }
+
+        inputFrameCount++;
+//        Log.w(TAG, "inputCount / Cur / Last / Ready = " + inputFrameCount +
+//                " / " + curFrameIndex + " / " + lastFrameIndex + " / " + readyForServer);
+        numFramesSkipped += Integer.max(curFrameIndex - lastFrameIndex - 1, 0);
+        lastFrameIndex = curFrameIndex;
+
+        // If it runs faster, pause until the timestamp of the chosen frame matches that from the recorded trace
+        timeDiff = syncStartTime + SystemClock.uptimeMillis() - realStartTime - frameTimeArr.get(curFrameIndex);
+        if (timeDiff < 0) {
+            numFramesDelayed++;
+            try {
+                Thread.sleep(-timeDiff);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        File jpegFrame = new File(recordFolder, "ASR-" + frameTimeArr.get(curFrameIndex) + ".jpg");
+        try {
+            byte[] jpegBytes = Files.readAllBytes(jpegFrame.toPath());
+
+            // Do not use ASR results for making transmission decisions during playback
+            // For determinism, ensure that the same frames are sent to the server
+            if (frameSendResultArr.get(curFrameIndex) == SendSupplierResult.SUCCESS.ordinal()) {
+                ToServerExtras.ClientCmd clientCmd = prepCommand;
+                prepCommand = ToServerExtras.ClientCmd.NO_CMD;
+                serverComm.sendSupplier(() -> {
+                    ByteString jpegByteString = ByteString.copyFrom(jpegBytes);
+
+                    ToServerExtras toServerExtras = ToServerExtras.newBuilder()
+                            .setStep(MainActivity.this.step)
+                            .setClientCmd(clientCmd)
+                            .build();
+
+                    return InputFrame.newBuilder()
+                            .setPayloadType(PayloadType.IMAGE)
+                            .addPayloads(jpegByteString)
+                            .setExtras(pack(toServerExtras))
+                            .build();
+                }, SOURCE, true);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     class LogTimerTask extends TimerTask {
@@ -419,13 +562,13 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
     @Override
     protected void onDestroy() {
+        super.onDestroy();
         if (recognizer != null) {
             recognizer.cancel();
             recognizer.shutdown();
         }
         cameraCapture.shutdown();
         // TODO: Clean up the Zoom session?
-        super.onDestroy();
     }
 
     @Override
@@ -453,10 +596,10 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         recognizer.cancel();
         if (text.contains(KEYPHRASE)) {
             readyForServer = true;
-            runOnUiThread(() -> {
-                readyView.setVisibility(View.VISIBLE);
-                readyTextView.setVisibility(View.VISIBLE);
-            });
+//            runOnUiThread(() -> {
+//                readyView.setVisibility(View.VISIBLE);
+//                readyTextView.setVisibility(View.VISIBLE);
+//            });
         } else {
             recognizer.startListening(KWS_SEARCH);
         }

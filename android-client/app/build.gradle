@@ -16,8 +16,8 @@ android {
     buildToolsVersion "29.0.3"
 
     defaultConfig {
-        applicationId 'edu.cmu.cs.owf_ml2_sphinx'
-        minSdkVersion 24
+        applicationId 'edu.cmu.cs.ml2_sphinx_playback'
+        minSdkVersion 26
         targetSdkVersion 33
         versionCode 1
         versionName "1.0"
@@ -113,8 +113,6 @@ dependencies {
     implementation 'edu.cmu.cs.gabriel:client:2.4.1'
     implementation 'edu.cmu.cs.gabriel:protocol:2.0.1'
     implementation 'edu.cmu.cs.gabriel:camera:2.4.1'
-
-    implementation 'com.vuzix:sdk-speechrecognitionservice:1.95'
 
     def camerax_version = "1.0.0-rc03"
     // CameraX core library using camera2 implementation
