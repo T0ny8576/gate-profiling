@@ -103,7 +103,7 @@ public class MainActivity extends AppCompatActivity {
     private File videoFile;
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-z", Locale.US);
-    private final String LOGFILE = "CLOUDLET-" + sdf.format(new Date()) + ".txt";
+    private final String LOGFILE = "NO-GATING-" + sdf.format(new Date()) + ".txt";
 
     private final ConcurrentLinkedDeque<String> logList = new ConcurrentLinkedDeque<>();
     private BatteryManager mBatteryManager;
@@ -120,8 +120,8 @@ public class MainActivity extends AppCompatActivity {
     private int lastFrameIndex = -1;
     private int numFramesSkipped = 0;
     private int numFramesDelayed = 0;
-    private final File recordFolder = new File("/sdcard/traces/CLOUDLET-Q-0");
-    private final String recordFile = "CLOUDLET.txt";
+    private final File recordFolder = new File("/sdcard/traces/NO-GATING-Q-0");
+    private final String recordFile = "NO-GATING.txt";
     private ArrayList<Long> frameTimeArr = new ArrayList<>();
     private ArrayList<Integer> frameSendResultArr = new ArrayList<>();
 
@@ -474,7 +474,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        File jpegFrame = new File(recordFolder, "CLOUDLET-" + frameTimeArr.get(curFrameIndex) + ".jpg");
+        File jpegFrame = new File(recordFolder, "NO-GATING-" + frameTimeArr.get(curFrameIndex) + ".jpg");
         try {
             byte[] jpegBytes = Files.readAllBytes(jpegFrame.toPath());
 

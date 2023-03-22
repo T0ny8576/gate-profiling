@@ -12,7 +12,6 @@ from multiprocessing import Process, Pipe
 import cv2
 import numpy as np
 from PIL import Image
-import mediapipe as mp
 
 import tensorflow as tf
 from object_detection.utils import label_map_util
@@ -66,8 +65,6 @@ logger = logging.getLogger(__name__)
 _State = namedtuple('_State', ['always_transition', 'has_class_transitions', 'processors'])
 _Classifier = namedtuple('_Classifier', ['model', 'labels'])
 _Detector = namedtuple('_Detector', ['detector', 'category_index'])
-
-mp_hands = mp.solutions.hands
 
 aruco_error_audio = 'Please place the bolt near the aruco marker, and make sure ' \
                     'the marker is fully shown.'
@@ -219,11 +216,6 @@ class _StatesForExpertCall:
         return self._transition_to_state[name]
 
 
-def _thumbs_up_required(processor):
-    return (processor.callable_name == GATED_TWO_STAGE_PROCESSOR and
-            json.loads(processor.callable_args)[THUMBS_UP_REQUIRED].strip().lower() == "true")
-
-
 class InferenceEngine(cognitive_engine.Engine):
 
     def __init__(self, fsm_file_path):
@@ -248,11 +240,6 @@ class InferenceEngine(cognitive_engine.Engine):
         ])
         self._fsm_file_name = os.path.basename(fsm_file_path)
         self._states_models = _StatesModels(fsm_file_path)
-
-        # Reference: https://google.github.io/mediapipe/solutions/hands.html
-        self._hands = mp_hands.Hands(max_num_hands=2,
-                                     min_detection_confidence=0.7,
-                                     min_tracking_confidence=0.7)
 
         start_state = self._states_models.get_start_state()
         assert start_state.always_transition is not None, 'bad start state'
@@ -304,19 +291,13 @@ class InferenceEngine(cognitive_engine.Engine):
         to_client_extras.step = transition.next_state
         to_client_extras.zoom_result = owf_pb2.ToClientExtras.ZoomResult.NO_CALL
 
-        # Whether to clear the 'thumbs-up' icon or not depends on whether the next
-        # state is 'gated' or not
         assert transition.next_state != '', "invalid transition end state"
+        to_client_extras.user_ready = owf_pb2.ToClientExtras.UserReady.DISABLE
         next_processors = self._states_models.get_state(transition.next_state).processors
-        if len(next_processors) == 1 and not _thumbs_up_required(next_processors[0]):
-            to_client_extras.user_ready = owf_pb2.ToClientExtras.UserReady.DISABLE
-        elif len(next_processors) == 0:
+        if len(next_processors) == 0:
             # End state reached
             logger.info("Client done. # Frame transmitted = %s", self._frame_tx_count)
             to_client_extras.step = "WCA_FSM_END"
-            to_client_extras.user_ready = owf_pb2.ToClientExtras.UserReady.DISABLE
-        else:
-            to_client_extras.user_ready = owf_pb2.ToClientExtras.UserReady.CLEAR
 
         result_wrapper.extras.Pack(to_client_extras)
         return result_wrapper
@@ -436,26 +417,6 @@ class InferenceEngine(cognitive_engine.Engine):
         img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
         # ############################################### Detecting hand gestures
-        if _thumbs_up_required(processor):
-            result = self._hands.process(img)
-            if result.multi_hand_landmarks and len(result.multi_hand_landmarks) == 1:
-                hand_landmark = result.multi_hand_landmarks[0].landmark
-                thumb_state = hg.get_thumb_state(hand_landmark, img.shape)
-
-                if thumb_state == 'thumbs up':
-                    print('Thumbs up detected.')
-                    if not self._thumbs_up_found:
-                        self._thumbs_up_found = True
-                        return self._result_wrapper_for(step, user_ready=owf_pb2.ToClientExtras.UserReady.SET)
-
-                elif thumb_state == 'thumbs down':
-                    print('Thumbs down detected.')
-                    self._thumbs_up_found = False
-                    return self._result_wrapper_for(step, user_ready=owf_pb2.ToClientExtras.UserReady.CLEAR)
-
-            if not self._thumbs_up_found:
-                # User not ready yet, return without running the two phase object detection
-                return self._result_wrapper_for(step)
         # ###############################################
 
         # Insert a new axis to make an input tensor of shape (1, h, w, channel)
@@ -517,8 +478,7 @@ class InferenceEngine(cognitive_engine.Engine):
                 (xmin, ymin, xmax, ymax) = (xmin * im_width, ymin * im_height,
                                             xmax * im_width, ymax * im_height)
                 img, re1, size_ob = ms.size_measuring(xmin, ymin, xmax, ymax, img)
-                user_ready_after_error = (owf_pb2.ToClientExtras.UserReady.CLEAR if _thumbs_up_required(processor)
-                                          else owf_pb2.ToClientExtras.UserReady.DISABLE)
+                user_ready_after_error = owf_pb2.ToClientExtras.UserReady.DISABLE
 
                 if re1 == -2:
                     # Possibly a false positive detection - detecting the aruco marker as the bolt
