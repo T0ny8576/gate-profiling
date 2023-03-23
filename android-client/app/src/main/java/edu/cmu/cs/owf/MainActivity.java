@@ -4,13 +4,7 @@ import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.camera.core.CameraSelector;
-import androidx.camera.core.ImageAnalysis;
-import androidx.camera.core.ImageProxy;
-import androidx.camera.view.PreviewView;
 
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
@@ -18,12 +12,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.AssetManager;
+import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.media.MediaPlayer;
 import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.SystemClock;
-import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.view.View;
@@ -42,16 +36,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.List;
 import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
-import edu.cmu.cs.gabriel.camera.CameraCapture;
 import edu.cmu.cs.gabriel.camera.ImageViewUpdater;
-import edu.cmu.cs.gabriel.camera.YuvToJPEGConverter;
 import edu.cmu.cs.gabriel.client.comm.ServerComm;
 import edu.cmu.cs.gabriel.client.results.ErrorType;
 import edu.cmu.cs.gabriel.protocol.Protos.InputFrame;
@@ -77,10 +70,6 @@ public class MainActivity extends AppCompatActivity {
     public static final String EXTRA_APP_SECRET = "edu.cmu.cs.owf.APP_SECRET";
     public static final String EXTRA_MEETING_NUMBER = "edu.cmu.cs.owf.MEETING_NUMBER";
     public static final String EXTRA_MEETING_PASSWORD = "edu.cmu.cs.owf.MEETING_PASSWORD";
-
-    private static final int REQUEST_CODE = 999;
-    private static final String CALL_EXPERT = "CALL EXPERT";
-    private static final String REPORT = "REPORT";
     private static final String WCA_FSM_START = "WCA_FSM_START";
     private static final String WCA_FSM_END = "WCA_FSM_END";
     private ToServerExtras.ClientCmd reqCommand = ToServerExtras.ClientCmd.NO_CMD;
@@ -89,8 +78,7 @@ public class MainActivity extends AppCompatActivity {
     private String step = WCA_FSM_START;
 
     private ServerComm serverComm;
-    private YuvToJPEGConverter yuvToJPEGConverter;
-    private CameraCapture cameraCapture;
+    private ML2CameraCapture cameraCapture;
 
     private TextToSpeech textToSpeech;
     private ImageViewUpdater instructionViewUpdater;
@@ -110,6 +98,7 @@ public class MainActivity extends AppCompatActivity {
     private Timer timer;
     private int inputFrameCount = 0;
     private static final long TIMER_PERIOD = 1000;
+    private ExecutorService pool;
 
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -244,7 +233,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         videoFile = new File(this.getCacheDir(), VIDEO_NAME);
-        PreviewView viewFinder = findViewById(R.id.viewFinder);
+        ImageView viewFinder = findViewById(R.id.viewFinder);
 
         readyView = findViewById(R.id.readyView);
         readyTextView = findViewById(R.id.readyTextView);
@@ -314,8 +303,9 @@ public class MainActivity extends AppCompatActivity {
         };
         this.textToSpeech = new TextToSpeech(this, onInitListener);
 
-        yuvToJPEGConverter = new YuvToJPEGConverter(this, 100);
-        cameraCapture = new CameraCapture(this, analyzer, WIDTH, HEIGHT, viewFinder, CameraSelector.DEFAULT_BACK_CAMERA, false);
+        cameraCapture = new ML2CameraCapture(WIDTH, HEIGHT, viewFinder);
+        pool = Executors.newFixedThreadPool(1);
+        pool.execute(this::processCameraFrame);
     }
 
     class LogTimerTask extends TimerTask {
@@ -351,14 +341,17 @@ public class MainActivity extends AppCompatActivity {
                 .build();
     }
 
-    final private ImageAnalysis.Analyzer analyzer = new ImageAnalysis.Analyzer() {
-        @Override
-        public void analyze(@NonNull ImageProxy image) {
-            image.close();
+
+    private void processCameraFrame() {
+        while (true) {
+            Bitmap rgbaBitmap = cameraCapture.updateImagePreview();
+            if (rgbaBitmap == null) {
+                continue;
+            }
 
             boolean toWait = (prepCommand != ToServerExtras.ClientCmd.NO_CMD);
             if ((!readyToCount || step.equals(WCA_FSM_END)) && !toWait) {
-                return;
+                continue;
             }
             inputFrameCount++;
             if (inputFrameCount == 1) {
@@ -372,7 +365,7 @@ public class MainActivity extends AppCompatActivity {
                 Log.i(TAG, "Profiling completed.");
             }
         }
-    };
+    }
 
     @Override
     protected void onDestroy() {

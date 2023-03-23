@@ -12,14 +12,20 @@ properties.load(project.rootProject.file('local.properties').newDataInputStream(
 
 android {
     compileSdkVersion 33
+    ndkVersion '25.0.8775105'
     buildToolsVersion "29.0.3"
 
     defaultConfig {
-        applicationId 'edu.cmu.cs.idle_preview_only'
+        applicationId 'edu.cmu.cs.ml2_idle_preview_only'
         minSdkVersion 24
         targetSdkVersion 33
         versionCode 1
         versionName "1.0"
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_static'
+            }
+        }
     }
 
     buildTypes {
@@ -29,6 +35,23 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    flavorDimensions 'cpuArch'
+    productFlavors {
+        ml2 {
+            dimension 'cpuArch'
+            ndk {
+                abiFilters 'x86_64'
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            version '3.22.1+'
+            path 'src/main/cpp/CMakeLists.txt'
         }
     }
 
@@ -58,7 +81,32 @@ android {
     }
 }
 
+gradle.projectsEvaluated {
+    task cleanCxx {
+        doLast {
+            delete project.file(".cxx")
+        }
+    }
+
+    task cleanCxxDebug {
+        doLast {
+            delete project.file(".cxx/Debug")
+        }
+    }
+
+    task cleanCxxRelease {
+        doLast {
+            delete project.file(".cxx/Release")
+        }
+    }
+
+    externalNativeBuildCleanMl2Debug.finalizedBy(cleanCxxDebug)
+    externalNativeBuildCleanMl2Release.finalizedBy(cleanCxxRelease)
+    clean.finalizedBy(cleanCxx)
+}
+
 dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
     implementation 'androidx.core:core:1.9.0'
     implementation 'com.google.android.material:material:1.4.0'
 
