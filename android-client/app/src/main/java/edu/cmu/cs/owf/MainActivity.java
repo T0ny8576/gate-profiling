@@ -127,6 +127,11 @@ public class MainActivity extends AppCompatActivity {
     private ArrayList<Integer> frameSendResultArr = new ArrayList<>();
     private ExecutorService pool;
 
+    private final ConcurrentLinkedDeque<Long> frameThumbsUpLocalTime = new ConcurrentLinkedDeque<>();
+    private final ConcurrentLinkedDeque<Long> frameDroppedLocalTime = new ConcurrentLinkedDeque<>();
+    private final ConcurrentLinkedDeque<Long> frameSentLocalTime = new ConcurrentLinkedDeque<>();
+    private final ConcurrentLinkedDeque<Long> frameSentRTT = new ConcurrentLinkedDeque<>();
+
     private final ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             new ActivityResultCallback<ActivityResult>() {
@@ -166,6 +171,11 @@ public class MainActivity extends AppCompatActivity {
                             .create();
                     alertDialog.show();
                 });
+            }
+
+            long frameTimeStamp = toClientExtras.getFrameStamp();
+            if (frameTimeStamp != 0) {
+                frameSentRTT.add(SystemClock.uptimeMillis() - frameTimeStamp);
             }
 
             // TODO: Make member variables atomic if using more than 1 Gabriel Tokens
@@ -422,6 +432,7 @@ public class MainActivity extends AppCompatActivity {
                     if (!handsResult.multiHandLandmarks().isEmpty()) {
                         if (handsResult.timestamp() > currentStepStartTime &&
                                 ThumbsUpDetection.detectThumbsUp(handsResult)) {
+                            frameThumbsUpLocalTime.add(SystemClock.uptimeMillis() - handsResult.timestamp());
                             readyForServer = true;
                             runOnUiThread(() -> {
                                 readyView.setVisibility(View.VISIBLE);
@@ -447,6 +458,25 @@ public class MainActivity extends AppCompatActivity {
         timer.cancel();
         timer.purge();
         unregisterReceiver(batteryReceiver);
+
+        logList.add("\nframeThumbsUpLocalTime:\n");
+        for (Long timeDiff: frameThumbsUpLocalTime) {
+            logList.add(timeDiff + ",");
+        }
+        logList.add("\nframeDroppedLocalTime:\n");
+        for (Long timeDiff: frameDroppedLocalTime) {
+            logList.add(timeDiff + ",");
+        }
+        logList.add("\nframeSentLocalTime:\n");
+        for (Long timeDiff: frameSentLocalTime) {
+            logList.add(timeDiff + ",");
+        }
+        logList.add("\nframeSentRTT:\n");
+        for (Long timeDiff: frameSentRTT) {
+            logList.add(timeDiff + ",");
+        }
+        logList.add("\n");
+
         try {
             for (String logString: logList) {
                 logFileWriter.write(logString);
@@ -554,6 +584,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
+        long jpegTime = SystemClock.uptimeMillis();
         File jpegFrame = new File(recordFolder, "THUMBSUP-" + frameTimeArr.get(curFrameIndex) + ".jpg");
         try {
             byte[] jpegBytes = Files.readAllBytes(jpegFrame.toPath());
@@ -566,9 +597,12 @@ public class MainActivity extends AppCompatActivity {
                     serverComm.sendSupplier(() -> {
                         ByteString jpegByteString = ByteString.copyFrom(jpegBytes);
 
+                        long timeBeforeSending = SystemClock.uptimeMillis();
+                        frameSentLocalTime.add(timeBeforeSending - jpegTime);
                         ToServerExtras toServerExtras = ToServerExtras.newBuilder()
                                 .setStep(MainActivity.this.step)
                                 .setClientCmd(clientCmd)
+                                .setFrameStamp(timeBeforeSending)
                                 .build();
 
                         return InputFrame.newBuilder()
@@ -577,6 +611,8 @@ public class MainActivity extends AppCompatActivity {
                                 .setExtras(pack(toServerExtras))
                                 .build();
                     }, SOURCE, true);
+                } else {
+                    frameDroppedLocalTime.add(SystemClock.uptimeMillis() - jpegTime);
                 }
             } else {
                 // A few frames that should be consumed here might be dropped due to the
@@ -584,7 +620,7 @@ public class MainActivity extends AppCompatActivity {
                 ByteArrayInputStream bais = new ByteArrayInputStream(jpegBytes);
                 Bitmap bitmapImage = BitmapFactory.decodeStream(bais);
                 bais.close();
-                thumbsUpDetector.hands.send(bitmapImage, SystemClock.uptimeMillis());
+                thumbsUpDetector.hands.send(bitmapImage, jpegTime);
             }
         } catch (IOException e) {
             e.printStackTrace();

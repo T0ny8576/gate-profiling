@@ -14,6 +14,7 @@ message ToServerExtras {
         REPORT = 3;
     }
     ClientCmd client_cmd = 2;
+    int64 frame_stamp = 3;
 }
 
 message ToClientExtras {
@@ -32,6 +33,7 @@ message ToClientExtras {
         DISABLE = 3;
     }
     UserReady user_ready = 4;
+    int64 frame_stamp = 5;
 }
 
 message ZoomInfo {

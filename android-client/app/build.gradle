@@ -16,7 +16,7 @@ android {
     buildToolsVersion "29.0.3"
 
     defaultConfig {
-        applicationId 'edu.cmu.cs.ml2_t_playback'
+        applicationId 'edu.cmu.cs.ml2_latency_t_playback'
         minSdkVersion 26
         targetSdkVersion 33
         versionCode 1
