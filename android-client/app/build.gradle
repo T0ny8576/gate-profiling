@@ -16,7 +16,7 @@ android {
     buildToolsVersion "29.0.3"
 
     defaultConfig {
-        applicationId 'edu.cmu.cs.owf_ml2_sphinx'
+        applicationId 'edu.cmu.cs.latency_sphinx'
         minSdkVersion 24
         targetSdkVersion 33
         versionCode 1
